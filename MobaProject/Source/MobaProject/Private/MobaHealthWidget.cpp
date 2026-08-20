@@ -1,12 +1,20 @@
 #include "MobaHealthWidget.h"
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/ProgressBar.h"
 #include "Components/WidgetComponent.h"
+#include "MobaAttributeSet.h"
 #include "MobaBaseCharacter.h"
+
+void UMobaHealthWidget::SetOwnerActor(AActor* InOwner)
+{
+	OwnerActor = InOwner;
+}
 
 void UMobaHealthWidget::SetOwnerCharacter(AMobaBaseCharacter* InOwner)
 {
-	OwnerCharacter = InOwner;
+	OwnerActor = InOwner;
 }
 
 TSharedRef<SWidget> UMobaHealthWidget::RebuildWidget()
@@ -24,9 +32,12 @@ void UMobaHealthWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	if (const UWidgetComponent* Comp = GetTypedOuter<UWidgetComponent>())
+	if (!OwnerActor)
 	{
-		OwnerCharacter = Cast<AMobaBaseCharacter>(Comp->GetOwner());
+		if (const UWidgetComponent* Comp = GetTypedOuter<UWidgetComponent>())
+		{
+			OwnerActor = Comp->GetOwner();
+		}
 	}
 }
 
@@ -34,11 +45,19 @@ void UMobaHealthWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
-	if (!Bar || !OwnerCharacter)
+	if (!Bar || !OwnerActor)
 	{
 		return;
 	}
 
-	const float Max = OwnerCharacter->GetMaxHealth();
-	Bar->SetPercent(Max > 0.f ? OwnerCharacter->GetHealth() / Max : 0.f);
+	const IAbilitySystemInterface* ASI = Cast<IAbilitySystemInterface>(OwnerActor);
+	UAbilitySystemComponent* ASC = ASI ? ASI->GetAbilitySystemComponent() : nullptr;
+	const UMobaAttributeSet* Set = ASC ? ASC->GetSet<UMobaAttributeSet>() : nullptr;
+	if (!Set)
+	{
+		return;
+	}
+
+	const float Max = Set->GetMaxHealth();
+	Bar->SetPercent(Max > 0.f ? Set->GetHealth() / Max : 0.f);
 }

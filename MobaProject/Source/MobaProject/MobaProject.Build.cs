@@ -18,7 +18,10 @@ public class MobaProject : ModuleRules
 			"GameplayAbilities",
 			"GameplayTags",
 			"GameplayTasks",
-			"UMG"
+			"UMG",
+			"Slate",
+			"SlateCore",
+			"AIModule"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

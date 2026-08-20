@@ -83,3 +83,9 @@ Plugins/**/Intermediate/
 # Cache files for the editor to use
 DerivedDataCache/
 **/DerivedDataCache/
+
+# Source FBX (imported to Content as uassets)
+Raw/
+
+# Paragon animation pack (~3.7GB). Keep local; use LFS or Drive if you need to share it.
+MobaProject/Content/ParagonAnims/

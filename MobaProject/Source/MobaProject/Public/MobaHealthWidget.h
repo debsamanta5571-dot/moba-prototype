@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "MobaHealthWidget.generated.h"
 
+class AActor;
 class AMobaBaseCharacter;
 class UProgressBar;
 
@@ -13,6 +14,7 @@ class MOBAPROJECT_API UMobaHealthWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	void SetOwnerActor(AActor* InOwner);
 	void SetOwnerCharacter(AMobaBaseCharacter* InOwner);
 
 protected:
@@ -21,7 +23,7 @@ protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	UPROPERTY()
-	TObjectPtr<AMobaBaseCharacter> OwnerCharacter;
+	TObjectPtr<AActor> OwnerActor;
 
 	UPROPERTY()
 	TObjectPtr<UProgressBar> Bar;
