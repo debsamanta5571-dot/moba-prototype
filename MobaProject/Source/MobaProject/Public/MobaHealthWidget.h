@@ -6,7 +6,9 @@
 
 class AActor;
 class AMobaBaseCharacter;
+class UBorder;
 class UProgressBar;
+class UTextBlock;
 
 UCLASS()
 class MOBAPROJECT_API UMobaHealthWidget : public UUserWidget
@@ -22,9 +24,17 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
+	void UpdateStatus();
+
 	UPROPERTY()
 	TObjectPtr<AActor> OwnerActor;
 
 	UPROPERTY()
 	TObjectPtr<UProgressBar> Bar;
+
+	UPROPERTY()
+	TObjectPtr<UBorder> StatusFrame;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> StatusText;
 };

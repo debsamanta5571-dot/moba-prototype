@@ -22,6 +22,13 @@ public:
 		const FGameplayAbilityActivationInfo ActivationInfo,
 		const FGameplayEventData* TriggerEventData) override;
 
+	virtual void EndAbility(
+		const FGameplayAbilitySpecHandle Handle,
+		const FGameplayAbilityActorInfo* ActorInfo,
+		const FGameplayAbilityActivationInfo ActivationInfo,
+		bool bReplicateEndAbility,
+		bool bWasCancelled) override;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skillshot")
 	TObjectPtr<UAnimMontage> SkillshotMontage;
 
@@ -39,13 +46,14 @@ public:
 
 protected:
 	UFUNCTION()
-	void OnSkillshotFire(FGameplayEventData Payload);
+	void FireShot();
 
 	UFUNCTION()
 	void OnMontageDone();
 
-	void SpawnBolt(bool bCosmetic);
+	void SpawnBolt(bool bCosmetic, bool bHideVisuals = false);
 
 	bool bFiredThisCast = false;
 	bool bEndedThisCast = false;
+	FTimerHandle FireTimer;
 };

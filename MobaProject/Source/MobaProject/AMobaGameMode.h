@@ -12,7 +12,12 @@ class MOBAPROJECT_API AAMobaGameMode : public AGameModeBase
 public:
 	AAMobaGameMode();
 
-	virtual void PostLogin(APlayerController* NewPlayer) override;
+	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+	virtual void RestartPlayerAtPlayerStart(AController* NewPlayer, AActor* StartSpot) override;
 
-	int32 NextTeamId = 0;
+protected:
+	void AssignTeam(APlayerController* Player);
+	int32 CountTeam(int32 TeamId) const;
+	int32 GetStartTeamId(const AActor* Start) const;
 };

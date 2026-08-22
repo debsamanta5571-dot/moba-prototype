@@ -4,7 +4,9 @@
 #include "GameFramework/Actor.h"
 #include "MobaGroundMarker.generated.h"
 
+class AActor;
 class UStaticMeshComponent;
+class UWorld;
 
 UCLASS(Blueprintable)
 class MOBAPROJECT_API AMobaGroundMarker : public AActor
@@ -16,7 +18,9 @@ public:
 
 	void InitAsAimRing(float Radius, float MaxRange);
 	void InitAsBlast(float Radius, float Lifetime, bool bCosmetic);
+	static void DestroyAllFor(UWorld* World, const AActor* OwnerOrInstigator);
 
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -34,6 +38,8 @@ protected:
 
 	void ApplyDisplayMesh();
 	void SetRadiusScale(float Radius, float HeightScale);
+	void HideAllVisuals();
+	void ShowAllVisuals();
 
 	UPROPERTY(Replicated)
 	float TargetRadius = 250.f;

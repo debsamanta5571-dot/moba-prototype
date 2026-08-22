@@ -16,6 +16,7 @@ class MOBAPROJECT_API UGA_MobaGroundTarget : public UMobaGameplayAbility
 
 public:
 	UGA_MobaGroundTarget();
+	virtual void PostInitProperties() override;
 
 	virtual void ActivateAbility(
 		const FGameplayAbilitySpecHandle Handle,
@@ -26,6 +27,13 @@ public:
 	virtual void BeginHold(AMobaBaseCharacter* Avatar) const override;
 	virtual void ConfirmHold(AMobaBaseCharacter* Avatar) const override;
 	virtual void CancelHold(AMobaBaseCharacter* Avatar) const override;
+
+	virtual void EndAbility(
+		const FGameplayAbilitySpecHandle Handle,
+		const FGameplayAbilityActorInfo* ActorInfo,
+		const FGameplayAbilityActivationInfo ActivationInfo,
+		bool bReplicateEndAbility,
+		bool bWasCancelled) override;
 
 	static FVector TraceGroundAim(const ACharacter* Character, float MaxRange);
 
@@ -52,18 +60,17 @@ public:
 
 protected:
 	UFUNCTION()
-	void OnBlastNotify(FGameplayEventData Payload);
+	void FireBlast();
 
 	UFUNCTION()
 	void OnMontageDone();
 
-	void DoBlast();
-
-	static FVector LocationFromEvent(const FGameplayEventData* EventData, const ACharacter* FallbackCharacter, float MaxRange);
-	void ApplyBlastDamage(ACharacter* Character, const FVector& Location) const;
-	void SpawnBlast(ACharacter* Character, const FVector& Location, bool bCosmetic) const;
+	void SpawnBlast(bool bCosmetic);
+	void ApplyBlastDamage();
 
 	FVector PendingBlastLocation = FVector::ZeroVector;
 	bool bBlastedThisCast = false;
 	bool bEndedThisCast = false;
+	FTimerHandle CastFailsafeTimer;
+	FTimerHandle BlastTimer;
 };

@@ -2,9 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "MobaEffect.h"
 #include "MobaProjectile.generated.h"
 
 class UProjectileMovementComponent;
+class USoundBase;
 class USphereComponent;
 class UStaticMeshComponent;
 
@@ -16,8 +18,17 @@ class MOBAPROJECT_API AMobaProjectile : public AActor
 public:
 	AMobaProjectile();
 
-	void InitFlight(const FVector& Direction, float Speed, float InDamage, float Lifetime, bool bCosmetic);
+	void InitFlight(
+		const FVector& Direction,
+		float Speed,
+		float InDamage,
+		float Lifetime,
+		bool bCosmetic,
+		const TArray<FMobaEffectSpec>& InHitEffects = TArray<FMobaEffectSpec>(),
+		bool bHideVisuals = false);
 
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual bool IsNetRelevantFor(
 		const AActor* RealViewer,
 		const AActor* ViewTarget,
@@ -45,6 +56,19 @@ protected:
 	void OnStop(const FHitResult& ImpactResult);
 
 	void ConsumeAndDestroy(AActor* DamageTarget);
+	void SpawnDestroyVfx();
+	void SetupCollision();
+	void HideAllVisuals();
+	void ShowAllVisuals();
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
+	TSubclassOf<AActor> DestroyVfxClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
+	float DestroyVfxLife = 0.7f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|SFX")
+	TObjectPtr<USoundBase> DestroySound;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moba")
 	TObjectPtr<USphereComponent> Collision;
@@ -57,5 +81,7 @@ protected:
 
 	float Damage = 25.f;
 	bool bCosmetic = false;
+	bool bHideVisuals = false;
 	bool bConsumed = false;
+	TArray<FMobaEffectSpec> HitEffects;
 };

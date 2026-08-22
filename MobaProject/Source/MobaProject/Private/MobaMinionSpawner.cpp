@@ -40,9 +40,9 @@ void AMobaMinionSpawner::SpawnWave()
 			nullptr,
 			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn))
 		{
-			Minion->SetTeamId(TeamID);
 			Minion->SetGoalTower(GoalTower);
 			UGameplayStatics::FinishSpawningActor(Minion, SpawnTM);
+			Minion->SetTeamId(TeamID);
 		}
 	}
 }

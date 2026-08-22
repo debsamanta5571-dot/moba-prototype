@@ -4,9 +4,13 @@
 #include "Abilities/GameplayAbilityTargetTypes.h"
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "MobaEffect.h"
+#include "MobaSfx.h"
 #include "MobaGameplayAbility.generated.h"
 
 class AMobaBaseCharacter;
+class USoundBase;
+class UTexture2D;
 
 UCLASS()
 class MOBAPROJECT_API UMobaGameplayAbility : public UGameplayAbility
@@ -37,6 +41,9 @@ public:
 	float Cooldown = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
+	float EnergyCost = 20.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
 	FGameplayTag ActivateEventTag;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
@@ -44,6 +51,30 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
 	bool bHoldToAim = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
+	TObjectPtr<UTexture2D> Icon;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
+	TArray<FMobaEffectSpec> Effects;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|SFX")
+	TObjectPtr<USoundBase> CastSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|SFX")
+	TObjectPtr<USoundBase> HitSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|SFX")
+	EMobaSfx DefaultCastSfx = EMobaSfx::None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|SFX")
+	EMobaSfx DefaultHitSfx = EMobaSfx::None;
+
+	void PlayCastSfx() const;
+	void PlayCastSfxAt(const FVector& Location) const;
+	void PlayHitSfx(const FVector& Location) const;
+
+	bool ApplyAbilityHit(AActor* Target, float InDamage, bool bApplySelfEffects = true) const;
 
 protected:
 	void ApplyMobaCooldown() const;

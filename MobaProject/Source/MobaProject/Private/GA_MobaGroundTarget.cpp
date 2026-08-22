@@ -1,9 +1,10 @@
 #include "GA_MobaGroundTarget.h"
+#include "AbilitySystemComponent.h"
 #include "Abilities/GameplayAbilityTriggerType.h"
 #include "Abilities/GameplayAbilityTypes.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
-#include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
-#include "AbilitySystemComponent.h"
+#include "Animation/AnimMontage.h"
+#include "AnimNotify_GroundTargetBlast.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 #include "Engine/OverlapResult.h"
@@ -12,24 +13,73 @@
 #include "GameFramework/PlayerController.h"
 #include "MobaBaseCharacter.h"
 #include "MobaGroundMarker.h"
+#include "TimerManager.h"
+
+namespace
+{
+	float GroundBlastDelay(UAnimMontage* Montage)
+	{
+		if (Montage)
+		{
+			for (const FAnimNotifyEvent& Event : Montage->Notifies)
+			{
+				if (Event.Notify && Event.Notify->IsA(UAnimNotify_GroundTargetBlast::StaticClass()))
+				{
+					return FMath::Max(0.f, Event.GetTriggerTime());
+				}
+			}
+		}
+		return 0.35f;
+	}
+}
+
+namespace
+{
+	FVector LocationFromEvent(const FGameplayEventData* EventData, const ACharacter* FallbackCharacter, float MaxRange)
+	{
+		if (EventData && EventData->TargetData.Num() > 0)
+		{
+			if (const FGameplayAbilityTargetData* Data = EventData->TargetData.Get(0))
+			{
+				const FVector Point = Data->GetEndPoint();
+				if (!Point.IsNearlyZero())
+				{
+					return Point;
+				}
+			}
+		}
+		return UGA_MobaGroundTarget::TraceGroundAim(FallbackCharacter, MaxRange);
+	}
+}
 
 UGA_MobaGroundTarget::UGA_MobaGroundTarget()
 {
 	CooldownTag = FGameplayTag::RequestGameplayTag(FName("Cooldown.GroundTarget"), false);
 	Cooldown = 6.f;
-	ActivateEventTag = FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget"), false);
+	EnergyCost = 40.f;
+	DefaultCastSfx = EMobaSfx::GroundBlast;
+	ActivateEventTag = FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget.Activate"), false);
 	bHoldToAim = true;
 	AimRingClass = AMobaGroundMarker::StaticClass();
 	BlastClass = AMobaGroundMarker::StaticClass();
 
-	const FGameplayTag CastingTag = FGameplayTag::RequestGameplayTag(FName("State.GroundCasting"), false);
-	ActivationOwnedTags.AddTag(CastingTag);
-	ActivationBlockedTags.AddTag(CastingTag);
-
+	AbilityTriggers.Reset();
 	FAbilityTriggerData Trigger;
 	Trigger.TriggerTag = ActivateEventTag;
 	Trigger.TriggerSource = EGameplayAbilityTriggerSource::GameplayEvent;
 	AbilityTriggers.Add(Trigger);
+
+	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
+
+	const FGameplayTag CastingTag = FGameplayTag::RequestGameplayTag(FName("State.GroundCasting"), false);
+	ActivationOwnedTags.AddTag(CastingTag);
+	ActivationBlockedTags.AddTag(CastingTag);
+}
+
+void UGA_MobaGroundTarget::PostInitProperties()
+{
+	Super::PostInitProperties();
+	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
 }
 
 void UGA_MobaGroundTarget::ActivateAbility(
@@ -57,67 +107,130 @@ void UGA_MobaGroundTarget::ActivateAbility(
 	bBlastedThisCast = false;
 	bEndedThisCast = false;
 	ApplyMobaCooldown();
+	Character->BeginPlantedAbility(2.5f);
 
-	if (!GroundTargetMontage)
+	if (GroundTargetMontage)
 	{
-		DoBlast();
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
-		return;
+		UAbilityTask_PlayMontageAndWait* PlayMontage = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
+			this,
+			NAME_None,
+			GroundTargetMontage);
+		PlayMontage->OnCompleted.AddDynamic(this, &UGA_MobaGroundTarget::OnMontageDone);
+		PlayMontage->OnBlendOut.AddDynamic(this, &UGA_MobaGroundTarget::OnMontageDone);
+		PlayMontage->OnInterrupted.AddDynamic(this, &UGA_MobaGroundTarget::OnMontageDone);
+		PlayMontage->OnCancelled.AddDynamic(this, &UGA_MobaGroundTarget::OnMontageDone);
+		PlayMontage->ReadyForActivation();
 	}
 
-	Character->BeginPlantedAbility();
-
-	UAbilityTask_WaitGameplayEvent* WaitBlast = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(
-		this,
-		FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget.Blast"), false),
-		nullptr,
-		true,
-		true);
-	WaitBlast->EventReceived.AddDynamic(this, &UGA_MobaGroundTarget::OnBlastNotify);
-	WaitBlast->ReadyForActivation();
-
-	UAbilityTask_PlayMontageAndWait* PlayMontage = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
-		this,
-		NAME_None,
-		GroundTargetMontage,
-		1.f,
-		NAME_None,
-		true,
-		0.f);
-	PlayMontage->OnCompleted.AddDynamic(this, &UGA_MobaGroundTarget::OnMontageDone);
-	PlayMontage->OnBlendOut.AddDynamic(this, &UGA_MobaGroundTarget::OnMontageDone);
-	PlayMontage->OnInterrupted.AddDynamic(this, &UGA_MobaGroundTarget::OnMontageDone);
-	PlayMontage->OnCancelled.AddDynamic(this, &UGA_MobaGroundTarget::OnMontageDone);
-	PlayMontage->ReadyForActivation();
+	if (UWorld* World = Character->GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BlastTimer);
+		World->GetTimerManager().ClearTimer(CastFailsafeTimer);
+		const float Delay = GroundTargetMontage ? GroundBlastDelay(GroundTargetMontage) : 0.f;
+		if (Delay <= KINDA_SMALL_NUMBER)
+		{
+			FireBlast();
+		}
+		else
+		{
+			World->GetTimerManager().SetTimer(BlastTimer, this, &UGA_MobaGroundTarget::FireBlast, Delay, false);
+		}
+		World->GetTimerManager().SetTimer(
+			CastFailsafeTimer,
+			this,
+			&UGA_MobaGroundTarget::OnMontageDone,
+			2.5f,
+			false);
+	}
 }
 
-void UGA_MobaGroundTarget::OnBlastNotify(FGameplayEventData Payload)
+void UGA_MobaGroundTarget::FireBlast()
 {
-	DoBlast();
-}
-
-void UGA_MobaGroundTarget::DoBlast()
-{
-	if (bBlastedThisCast)
+	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
+	if (!Character || bBlastedThisCast)
 	{
 		return;
 	}
 	bBlastedThisCast = true;
 
+	PlayCastSfxAt(PendingBlastLocation);
+	Character->PlayGroundBlastDebug(PendingBlastLocation, Radius, BlastLifetime);
+	if (Character->HasAuthority())
+	{
+		ApplyBlastDamage();
+	}
+}
+
+void UGA_MobaGroundTarget::SpawnBlast(bool bCosmetic)
+{
 	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
 	if (!Character)
 	{
 		return;
 	}
 
-	if (CurrentActorInfo && CurrentActorInfo->IsLocallyControlled())
+	UWorld* World = Character->GetWorld();
+	if (!World)
 	{
-		SpawnBlast(Character, PendingBlastLocation, true);
+		return;
 	}
-	if (HasAuthority(&CurrentActivationInfo))
+
+	AMobaGroundMarker::DestroyAllFor(World, Character);
+
+	TSubclassOf<AMobaGroundMarker> ClassToSpawn = BlastClass
+		? BlastClass
+		: TSubclassOf<AMobaGroundMarker>(AMobaGroundMarker::StaticClass());
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.Instigator = Character;
+
+	AMobaGroundMarker* Blast = World->SpawnActor<AMobaGroundMarker>(
+		ClassToSpawn,
+		PendingBlastLocation,
+		FRotator::ZeroRotator,
+		Params);
+	if (Blast)
 	{
-		ApplyBlastDamage(Character, PendingBlastLocation);
-		SpawnBlast(Character, PendingBlastLocation, false);
+		Blast->InitAsBlast(Radius, BlastLifetime, bCosmetic);
+	}
+}
+
+void UGA_MobaGroundTarget::ApplyBlastDamage()
+{
+	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
+	UWorld* World = Character ? Character->GetWorld() : nullptr;
+	if (!World)
+	{
+		return;
+	}
+
+	TArray<FOverlapResult> Overlaps;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(MobaGroundBlast), false, Character);
+	FCollisionObjectQueryParams Objects;
+	Objects.AddObjectTypesToQuery(ECC_Pawn);
+	Objects.AddObjectTypesToQuery(ECC_WorldStatic);
+	Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+	World->OverlapMultiByObjectType(
+		Overlaps,
+		PendingBlastLocation + FVector(0.f, 0.f, 80.f),
+		FQuat::Identity,
+		Objects,
+		FCollisionShape::MakeSphere(Radius),
+		Params);
+
+	TSet<AActor*> Damaged;
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		AActor* Target = Overlap.GetActor();
+		if (!IsValid(Target) || Target == Character || Damaged.Contains(Target))
+		{
+			continue;
+		}
+		if (ApplyAbilityHit(Target, Damage, Damaged.Num() == 0))
+		{
+			Damaged.Add(Target);
+		}
 	}
 }
 
@@ -127,12 +240,44 @@ void UGA_MobaGroundTarget::OnMontageDone()
 	{
 		return;
 	}
+	if (!bBlastedThisCast)
+	{
+		FireBlast();
+	}
 	bEndedThisCast = true;
 	if (AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo()))
 	{
+		if (UWorld* World = Character->GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(CastFailsafeTimer);
+			World->GetTimerManager().ClearTimer(BlastTimer);
+		}
 		Character->EndPlantedAbility();
 	}
 	EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+}
+
+void UGA_MobaGroundTarget::EndAbility(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayAbilityActivationInfo ActivationInfo,
+	bool bReplicateEndAbility,
+	bool bWasCancelled)
+{
+	if (AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo()))
+	{
+		if (UWorld* World = Character->GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(CastFailsafeTimer);
+			World->GetTimerManager().ClearTimer(BlastTimer);
+		}
+		if (!bEndedThisCast)
+		{
+			bEndedThisCast = true;
+			Character->EndPlantedAbility();
+		}
+	}
+	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
 
 void UGA_MobaGroundTarget::BeginHold(AMobaBaseCharacter* Avatar) const
@@ -143,32 +288,11 @@ void UGA_MobaGroundTarget::BeginHold(AMobaBaseCharacter* Avatar) const
 	}
 
 	Avatar->ClearAimRing();
-
-	UWorld* World = Avatar->GetWorld();
-	if (!World)
+	if (UWorld* World = Avatar->GetWorld())
 	{
-		return;
+		AMobaGroundMarker::DestroyAllFor(World, Avatar);
 	}
-
-	TSubclassOf<AMobaGroundMarker> RingClass = AimRingClass
-		? AimRingClass
-		: TSubclassOf<AMobaGroundMarker>(AMobaGroundMarker::StaticClass());
-
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	Params.Owner = Avatar;
-	Params.Instigator = Avatar;
-
-	AMobaGroundMarker* Ring = World->SpawnActor<AMobaGroundMarker>(
-		RingClass,
-		TraceGroundAim(Avatar, MaxRange),
-		FRotator::ZeroRotator,
-		Params);
-	if (Ring)
-	{
-		Ring->InitAsAimRing(Radius, MaxRange);
-		Avatar->SetAimRing(Ring);
-	}
+	Avatar->StartGroundAimDebug(Radius, MaxRange);
 }
 
 void UGA_MobaGroundTarget::ConfirmHold(AMobaBaseCharacter* Avatar) const
@@ -178,18 +302,32 @@ void UGA_MobaGroundTarget::ConfirmHold(AMobaBaseCharacter* Avatar) const
 		return;
 	}
 
+	if (!Avatar->HasEnergy(EnergyCost))
+	{
+		Avatar->NotifyNotEnoughEnergy();
+		return;
+	}
+
 	const FVector Location = Avatar->GetAimRing()
 		? Avatar->GetAimRing()->GetActorLocation()
 		: TraceGroundAim(Avatar, MaxRange);
 
 	Avatar->ClearAimRing();
+	Avatar->StopGroundAimDebug();
 
+	const FGameplayTag ActivateTag = FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget.Activate"), false);
 	FGameplayEventData EventData;
-	EventData.EventTag = ActivateEventTag;
+	EventData.EventTag = ActivateTag;
 	EventData.Instigator = Avatar;
 	EventData.Target = Avatar;
 	EventData.TargetData = MakeLocationTargetData(Location);
-	Avatar->GetAbilitySystemComponent()->HandleGameplayEvent(ActivateEventTag, &EventData);
+	Avatar->GetAbilitySystemComponent()->HandleGameplayEvent(ActivateTag, &EventData);
+	Avatar->StartCooldown(CooldownTag, Cooldown);
+
+	if (!Avatar->HasAuthority())
+	{
+		Avatar->ServerConfirmGroundTarget(Location);
+	}
 }
 
 void UGA_MobaGroundTarget::CancelHold(AMobaBaseCharacter* Avatar) const
@@ -197,6 +335,7 @@ void UGA_MobaGroundTarget::CancelHold(AMobaBaseCharacter* Avatar) const
 	if (Avatar)
 	{
 		Avatar->ClearAimRing();
+		Avatar->StopGroundAimDebug();
 	}
 }
 
@@ -253,80 +392,4 @@ FVector UGA_MobaGroundTarget::TraceGroundAim(const ACharacter* Character, float 
 	}
 
 	return Point;
-}
-
-FVector UGA_MobaGroundTarget::LocationFromEvent(
-	const FGameplayEventData* EventData,
-	const ACharacter* FallbackCharacter,
-	float MaxRange)
-{
-	if (EventData && EventData->TargetData.Num() > 0)
-	{
-		if (const FGameplayAbilityTargetData* Data = EventData->TargetData.Get(0))
-		{
-			const FVector Point = Data->GetEndPoint();
-			if (!Point.IsNearlyZero())
-			{
-				return Point;
-			}
-		}
-	}
-
-	return TraceGroundAim(FallbackCharacter, MaxRange);
-}
-
-void UGA_MobaGroundTarget::ApplyBlastDamage(ACharacter* Character, const FVector& Location) const
-{
-	UWorld* World = Character ? Character->GetWorld() : nullptr;
-	if (!World)
-	{
-		return;
-	}
-
-	TArray<FOverlapResult> Overlaps;
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(MobaGroundBlast), false, Character);
-	World->OverlapMultiByChannel(
-		Overlaps,
-		Location + FVector(0.f, 0.f, 80.f),
-		FQuat::Identity,
-		ECC_Pawn,
-		FCollisionShape::MakeSphere(Radius),
-		Params);
-
-	TSet<AActor*> Damaged;
-	for (const FOverlapResult& Overlap : Overlaps)
-	{
-		AActor* Target = Overlap.GetActor();
-		if (!IsValid(Target) || Target == Character || Damaged.Contains(Target))
-		{
-			continue;
-		}
-		if (AMobaBaseCharacter::ApplyMobaDamage(Target, Damage, Character))
-		{
-			Damaged.Add(Target);
-		}
-	}
-}
-
-void UGA_MobaGroundTarget::SpawnBlast(ACharacter* Character, const FVector& Location, bool bCosmetic) const
-{
-	UWorld* World = Character ? Character->GetWorld() : nullptr;
-	if (!World)
-	{
-		return;
-	}
-
-	TSubclassOf<AMobaGroundMarker> ClassToSpawn = BlastClass
-		? BlastClass
-		: TSubclassOf<AMobaGroundMarker>(AMobaGroundMarker::StaticClass());
-
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	Params.Owner = Character;
-	Params.Instigator = Character;
-
-	if (AMobaGroundMarker* Blast = World->SpawnActor<AMobaGroundMarker>(ClassToSpawn, Location, FRotator::ZeroRotator, Params))
-	{
-		Blast->InitAsBlast(Radius, BlastLifetime, bCosmetic);
-	}
 }

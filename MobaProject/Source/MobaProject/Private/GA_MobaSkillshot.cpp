@@ -1,13 +1,36 @@
 #include "GA_MobaSkillshot.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
-#include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
+#include "Animation/AnimMontage.h"
+#include "AnimNotify_SkillshotFire.h"
+#include "Engine/World.h"
 #include "MobaBaseCharacter.h"
 #include "MobaProjectile.h"
+#include "TimerManager.h"
+
+namespace
+{
+	float SkillshotFireDelay(UAnimMontage* Montage)
+	{
+		if (Montage)
+		{
+			for (const FAnimNotifyEvent& Event : Montage->Notifies)
+			{
+				if (Event.Notify && Event.Notify->IsA(UAnimNotify_SkillshotFire::StaticClass()))
+				{
+					return FMath::Max(0.f, Event.GetTriggerTime());
+				}
+			}
+		}
+		return 0.2f;
+	}
+}
 
 UGA_MobaSkillshot::UGA_MobaSkillshot()
 {
 	CooldownTag = FGameplayTag::RequestGameplayTag(FName("Cooldown.Skillshot"), false);
 	Cooldown = 1.5f;
+	EnergyCost = 25.f;
+	DefaultCastSfx = EMobaSfx::SkillshotFire;
 }
 
 void UGA_MobaSkillshot::ActivateAbility(
@@ -34,15 +57,7 @@ void UGA_MobaSkillshot::ActivateAbility(
 	bFiredThisCast = false;
 	bEndedThisCast = false;
 	ApplyMobaCooldown();
-	Character->BeginPlantedAbility();
-
-	UAbilityTask_WaitGameplayEvent* WaitFire = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(
-		this,
-		FGameplayTag::RequestGameplayTag(FName("Event.Skillshot.Fire"), false),
-		nullptr,
-		true);
-	WaitFire->EventReceived.AddDynamic(this, &UGA_MobaSkillshot::OnSkillshotFire);
-	WaitFire->ReadyForActivation();
+	Character->BeginPlantedAbility(1.5f);
 
 	UAbilityTask_PlayMontageAndWait* PlayMontage = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
 		this,
@@ -53,41 +68,76 @@ void UGA_MobaSkillshot::ActivateAbility(
 	PlayMontage->OnInterrupted.AddDynamic(this, &UGA_MobaSkillshot::OnMontageDone);
 	PlayMontage->OnCancelled.AddDynamic(this, &UGA_MobaSkillshot::OnMontageDone);
 	PlayMontage->ReadyForActivation();
+
+	const float Delay = SkillshotFireDelay(SkillshotMontage);
+	if (UWorld* World = Character->GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(FireTimer);
+		if (Delay <= KINDA_SMALL_NUMBER)
+		{
+			FireShot();
+		}
+		else
+		{
+			World->GetTimerManager().SetTimer(FireTimer, this, &UGA_MobaSkillshot::FireShot, Delay, false);
+		}
+	}
 }
 
-void UGA_MobaSkillshot::OnSkillshotFire(FGameplayEventData Payload)
+void UGA_MobaSkillshot::FireShot()
 {
-	if (bFiredThisCast)
+	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
+	if (!Character || bFiredThisCast || !Character->TryClaimVfx(TEXT("Skillshot")))
 	{
 		return;
 	}
 	bFiredThisCast = true;
+	PlayCastSfx();
 
-	if (CurrentActorInfo && CurrentActorInfo->IsLocallyControlled())
+	const bool bLocal = Character->IsLocallyControlled();
+	const bool bAuth = Character->HasAuthority();
+	if (bAuth)
 	{
-		SpawnBolt(true);
+		SpawnBolt(false, false);
 	}
-	if (HasAuthority(&CurrentActivationInfo))
+	else if (bLocal)
 	{
-		SpawnBolt(false);
+		SpawnBolt(true, false);
 	}
 }
 
 void UGA_MobaSkillshot::OnMontageDone()
 {
-	if (bEndedThisCast)
+	if (!bFiredThisCast)
 	{
-		return;
-	}
-	bEndedThisCast = true;
-	if (AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo()))
-	{
-		Character->EndPlantedAbility();
+		FireShot();
 	}
 	EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
 }
 
-void UGA_MobaSkillshot::SpawnBolt(bool bCosmetic)
+void UGA_MobaSkillshot::EndAbility(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayAbilityActivationInfo ActivationInfo,
+	bool bReplicateEndAbility,
+	bool bWasCancelled)
+{
+	if (!bEndedThisCast)
+	{
+		bEndedThisCast = true;
+		if (AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo()))
+		{
+			if (UWorld* World = Character->GetWorld())
+			{
+				World->GetTimerManager().ClearTimer(FireTimer);
+			}
+			Character->EndPlantedAbility();
+		}
+	}
+	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
+}
+
+void UGA_MobaSkillshot::SpawnBolt(bool bCosmetic, bool bHideVisuals)
 {
 	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
 	if (!Character || !ProjectileClass)
@@ -98,18 +148,30 @@ void UGA_MobaSkillshot::SpawnBolt(bool bCosmetic)
 	const FVector Dir = Character->GetControlRotation().Vector();
 	const FVector Start = Character->GetActorLocation() + FVector(0.f, 0.f, 40.f) + Dir * 80.f;
 
+	UWorld* World = Character->GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	Params.Owner = Character;
 	Params.Instigator = Character;
 
-	AMobaProjectile* Bolt = Character->GetWorld()->SpawnActor<AMobaProjectile>(
+	AMobaProjectile* Bolt = World->SpawnActor<AMobaProjectile>(
 		ProjectileClass,
 		Start,
 		Dir.Rotation(),
 		Params);
 	if (Bolt)
 	{
-		Bolt->InitFlight(Dir, Speed, Damage, Lifetime, bCosmetic);
+		Bolt->InitFlight(
+			Dir,
+			Speed,
+			Damage,
+			Lifetime,
+			bCosmetic,
+			bCosmetic ? TArray<FMobaEffectSpec>() : Effects,
+			bHideVisuals);
 	}
 }

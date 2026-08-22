@@ -1,26 +1,27 @@
 #include "MobaGroundMarker.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "DrawDebugHelpers.h"
+#include "EngineUtils.h"
 #include "GA_MobaGroundTarget.h"
+#include "GameFramework/Pawn.h"
 #include "MobaBaseCharacter.h"
 #include "Net/UnrealNetwork.h"
 
 AMobaGroundMarker::AMobaGroundMarker()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	bReplicates = true;
-	bAlwaysRelevant = true;
+	bReplicates = false;
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->SetIsReplicated(false);
 }
 
 void AMobaGroundMarker::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
-	ApplyDisplayMesh();
 }
 
 void AMobaGroundMarker::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -33,98 +34,104 @@ void AMobaGroundMarker::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 
 void AMobaGroundMarker::ApplyDisplayMesh()
 {
-	if (DisplayMesh)
-	{
-		Mesh->SetStaticMesh(DisplayMesh);
-	}
 }
 
 void AMobaGroundMarker::SetRadiusScale(float Radius, float HeightScale)
 {
 	const float Scale = FMath::Max(Radius, 1.f) / 50.f;
-	Mesh->SetWorldScale3D(FVector(Scale, Scale, Scale * HeightScale));
+	const FVector NewScale(Scale, Scale, Scale * HeightScale);
+	TArray<UStaticMeshComponent*> Meshes;
+	GetComponents<UStaticMeshComponent>(Meshes);
+	for (UStaticMeshComponent* Comp : Meshes)
+	{
+		if (Comp)
+		{
+			Comp->SetWorldScale3D(NewScale);
+		}
+	}
 }
 
 void AMobaGroundMarker::InitAsAimRing(float Radius, float MaxRange)
 {
-	ApplyDisplayMesh();
 	bAiming = true;
 	bExpanding = false;
 	bCosmetic = true;
 	TargetRadius = Radius;
 	AimMaxRange = MaxRange;
 	SetReplicates(false);
-	SetRadiusScale(Radius, 0.08f);
+	HideAllVisuals();
 }
 
 void AMobaGroundMarker::InitAsBlast(float Radius, float Lifetime, bool bInCosmetic)
 {
-	ApplyDisplayMesh();
 	bAiming = false;
 	bExpanding = true;
-	bCosmetic = bInCosmetic;
+	bCosmetic = true;
 	TargetRadius = Radius;
 	BlastDuration = FMath::Max(Lifetime, 0.05f);
-	SetRadiusScale(1.f, 1.f);
-
-	if (bCosmetic)
-	{
-		SetReplicates(false);
-	}
-	else
-	{
-		Mesh->SetOwnerNoSee(true);
-		ForceNetUpdate();
-	}
-
+	SetReplicates(false);
+	HideAllVisuals();
 	SetLifeSpan(BlastDuration);
+}
+
+void AMobaGroundMarker::DestroyAllFor(UWorld* World, const AActor* OwnerOrInstigator)
+{
+	if (!World || !OwnerOrInstigator)
+	{
+		return;
+	}
+
+	TArray<AMobaGroundMarker*> ToDestroy;
+	for (TActorIterator<AMobaGroundMarker> It(World); It; ++It)
+	{
+		AMobaGroundMarker* Marker = *It;
+		if (Marker && (Marker->GetOwner() == OwnerOrInstigator || Marker->GetInstigator() == OwnerOrInstigator))
+		{
+			ToDestroy.Add(Marker);
+		}
+	}
+	for (AMobaGroundMarker* Marker : ToDestroy)
+	{
+		Marker->Destroy();
+	}
+}
+
+void AMobaGroundMarker::BeginPlay()
+{
+	Super::BeginPlay();
+}
+
+void AMobaGroundMarker::HideAllVisuals()
+{
+	TArray<UPrimitiveComponent*> Prims;
+	GetComponents<UPrimitiveComponent>(Prims);
+	for (UPrimitiveComponent* Prim : Prims)
+	{
+		if (Prim)
+		{
+			Prim->SetVisibility(false, true);
+			Prim->SetHiddenInGame(true, true);
+		}
+	}
+}
+
+void AMobaGroundMarker::ShowAllVisuals()
+{
+	TArray<UPrimitiveComponent*> Prims;
+	GetComponents<UPrimitiveComponent>(Prims);
+	for (UPrimitiveComponent* Prim : Prims)
+	{
+		if (Prim)
+		{
+			Prim->SetVisibility(true, true);
+			Prim->SetHiddenInGame(false, true);
+		}
+	}
 }
 
 void AMobaGroundMarker::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-
-	if (bAiming)
-	{
-		if (const AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(GetOwner()))
-		{
-			SetActorLocation(UGA_MobaGroundTarget::TraceGroundAim(Hero, AimMaxRange));
-		}
-		SetRadiusScale(TargetRadius, 0.08f);
-	}
-	else if (bExpanding)
-	{
-		const float Alpha = FMath::Clamp(GetGameTimeSinceCreation() / BlastDuration, 0.f, 1.f);
-		SetRadiusScale(TargetRadius * Alpha, 1.f);
-	}
-
-	if (!Mesh->GetStaticMesh())
-	{
-		if (bExpanding && !bCosmetic)
-		{
-			if (const APawn* OwnerPawn = Cast<APawn>(GetOwner()))
-			{
-				if (OwnerPawn->IsLocallyControlled())
-				{
-					return;
-				}
-			}
-		}
-
-		const float DrawRadius = bExpanding
-			? TargetRadius * FMath::Clamp(GetGameTimeSinceCreation() / BlastDuration, 0.f, 1.f)
-			: TargetRadius;
-		DrawDebugSphere(
-			GetWorld(),
-			GetActorLocation(),
-			DrawRadius,
-			16,
-			bAiming ? FColor::Cyan : FColor::Orange,
-			false,
-			-1.f,
-			0,
-			2.f);
-	}
 }
 
 bool AMobaGroundMarker::IsNetRelevantFor(
@@ -137,8 +144,13 @@ bool AMobaGroundMarker::IsNetRelevantFor(
 		return false;
 	}
 
-	const APawn* InstigatorPawn = GetInstigator();
-	if (InstigatorPawn && (ViewTarget == InstigatorPawn || RealViewer == InstigatorPawn->GetController()))
+	if (ViewTarget && (ViewTarget == GetOwner() || ViewTarget == GetInstigator()))
+	{
+		return false;
+	}
+
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner() ? GetOwner() : GetInstigator());
+	if (OwnerPawn && RealViewer == OwnerPawn->GetController())
 	{
 		return false;
 	}

@@ -1,6 +1,7 @@
 #include "UGA_MobaMelee.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
+#include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 #include "MobaBaseCharacter.h"
 
@@ -8,6 +9,9 @@ UUGA_MobaMelee::UUGA_MobaMelee()
 {
 	CooldownTag = FGameplayTag::RequestGameplayTag(FName("Cooldown.Melee"), false);
 	Cooldown = 1.f;
+	EnergyCost = 10.f;
+	DefaultCastSfx = EMobaSfx::MeleeCast;
+	DefaultHitSfx = EMobaSfx::MeleeHit;
 }
 
 void UUGA_MobaMelee::ActivateAbility(
@@ -34,7 +38,8 @@ void UUGA_MobaMelee::ActivateAbility(
 	bHitThisSwing = false;
 	bEndedThisSwing = false;
 	ApplyMobaCooldown();
-	Character->BeginPlantedAbility();
+	PlayCastSfx();
+	Character->BeginPlantedAbility(1.5f);
 
 	UAbilityTask_WaitGameplayEvent* WaitHit = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(
 		this,
@@ -68,13 +73,13 @@ void UUGA_MobaMelee::TryHit()
 	}
 	bHitThisSwing = true;
 
-	if (!HasAuthority(&CurrentActivationInfo))
+	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
+	if (!Character)
 	{
 		return;
 	}
 
-	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
-	if (!Character)
+	if (!HasAuthority(&CurrentActivationInfo))
 	{
 		return;
 	}
@@ -83,33 +88,58 @@ void UUGA_MobaMelee::TryHit()
 	const FVector Start = Character->GetActorLocation();
 	const FVector End = Start + Yaw.Vector() * Range;
 
-	FHitResult Hit;
 	FCollisionQueryParams Params;
 	Params.AddIgnoredActor(Character);
 
-	if (Character->GetWorld()->SweepSingleByChannel(
-		Hit,
+	FCollisionObjectQueryParams Objects;
+	Objects.AddObjectTypesToQuery(ECC_Pawn);
+	Objects.AddObjectTypesToQuery(ECC_WorldStatic);
+	Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+
+	TArray<FHitResult> Hits;
+	Character->GetWorld()->SweepMultiByObjectType(
+		Hits,
 		Start,
 		End,
 		FQuat::Identity,
-		ECC_Pawn,
+		Objects,
 		FCollisionShape::MakeSphere(Radius),
-		Params))
+		Params);
+
+	TSet<AActor*> Damaged;
+	for (const FHitResult& Hit : Hits)
 	{
-		AMobaBaseCharacter::ApplyMobaDamage(Hit.GetActor(), Damage, Character);
+		AActor* Target = Hit.GetActor();
+		if (!IsValid(Target) || Target == Character || Damaged.Contains(Target))
+		{
+			continue;
+		}
+		if (ApplyAbilityHit(Target, Damage, Damaged.Num() == 0))
+		{
+			Damaged.Add(Target);
+		}
 	}
 }
 
 void UUGA_MobaMelee::OnMontageDone()
 {
-	if (bEndedThisSwing)
-	{
-		return;
-	}
-	bEndedThisSwing = true;
-	if (AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo()))
-	{
-		Character->EndPlantedAbility();
-	}
 	EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+}
+
+void UUGA_MobaMelee::EndAbility(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayAbilityActivationInfo ActivationInfo,
+	bool bReplicateEndAbility,
+	bool bWasCancelled)
+{
+	if (!bEndedThisSwing)
+	{
+		bEndedThisSwing = true;
+		if (AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo()))
+		{
+			Character->EndPlantedAbility();
+		}
+	}
+	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }

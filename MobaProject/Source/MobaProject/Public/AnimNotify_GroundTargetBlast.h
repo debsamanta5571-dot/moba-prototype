@@ -11,9 +11,4 @@ class MOBAPROJECT_API UAnimNotify_GroundTargetBlast : public UAnimNotify_Ability
 
 public:
 	UAnimNotify_GroundTargetBlast();
-
-	virtual void Notify(
-		USkeletalMeshComponent* MeshComp,
-		UAnimSequenceBase* Animation,
-		const FAnimNotifyEventReference& EventReference) override;
 };

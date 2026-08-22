@@ -11,6 +11,8 @@ UGA_MobaDash::UGA_MobaDash()
 {
 	CooldownTag = FGameplayTag::RequestGameplayTag(FName("Cooldown.Dash"), false);
 	Cooldown = 3.f;
+	EnergyCost = 20.f;
+	DefaultCastSfx = EMobaSfx::Dash;
 	ActivateEventTag = FGameplayTag::RequestGameplayTag(FName("Event.Dash"), false);
 	bSendMoveDirection = true;
 
@@ -52,6 +54,7 @@ void UGA_MobaDash::ActivateAbility(
 	}
 
 	ApplyMobaCooldown();
+	PlayCastSfx();
 
 	if (DashMontage)
 	{
