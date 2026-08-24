@@ -3,35 +3,20 @@
 #include "Abilities/GameplayAbilityTriggerType.h"
 #include "Abilities/GameplayAbilityTypes.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
+#include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Animation/AnimMontage.h"
-#include "AnimNotify_GroundTargetBlast.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 #include "Engine/OverlapResult.h"
+#include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "MobaBaseCharacter.h"
 #include "MobaGroundMarker.h"
+#include "MobaMinion.h"
+#include "MobaTower.h"
 #include "TimerManager.h"
-
-namespace
-{
-	float GroundBlastDelay(UAnimMontage* Montage)
-	{
-		if (Montage)
-		{
-			for (const FAnimNotifyEvent& Event : Montage->Notifies)
-			{
-				if (Event.Notify && Event.Notify->IsA(UAnimNotify_GroundTargetBlast::StaticClass()))
-				{
-					return FMath::Max(0.f, Event.GetTriggerTime());
-				}
-			}
-		}
-		return 0.35f;
-	}
-}
 
 namespace
 {
@@ -48,27 +33,29 @@ namespace
 				}
 			}
 		}
+		if (AMobaBaseCharacter* Hero = const_cast<AMobaBaseCharacter*>(Cast<AMobaBaseCharacter>(FallbackCharacter)))
+		{
+			if (Hero->HasPendingAbilityLocation())
+			{
+				return Hero->ConsumePendingAbilityLocation();
+			}
+		}
 		return UGA_MobaGroundTarget::TraceGroundAim(FallbackCharacter, MaxRange);
 	}
 }
 
 UGA_MobaGroundTarget::UGA_MobaGroundTarget()
 {
-	CooldownTag = FGameplayTag::RequestGameplayTag(FName("Cooldown.GroundTarget"), false);
 	Cooldown = 6.f;
 	EnergyCost = 40.f;
 	DefaultCastSfx = EMobaSfx::GroundBlast;
 	ActivateEventTag = FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget.Activate"), false);
+	AnimNotifyTag = FGameplayTag::RequestGameplayTag(FName("Ability.3"), false);
 	bHoldToAim = true;
 	AimRingClass = AMobaGroundMarker::StaticClass();
 	BlastClass = AMobaGroundMarker::StaticClass();
 
 	AbilityTriggers.Reset();
-	FAbilityTriggerData Trigger;
-	Trigger.TriggerTag = ActivateEventTag;
-	Trigger.TriggerSource = EGameplayAbilityTriggerSource::GameplayEvent;
-	AbilityTriggers.Add(Trigger);
-
 	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
 
 	const FGameplayTag CastingTag = FGameplayTag::RequestGameplayTag(FName("State.GroundCasting"), false);
@@ -80,6 +67,15 @@ void UGA_MobaGroundTarget::PostInitProperties()
 {
 	Super::PostInitProperties();
 	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
+	bHoldToAim = true;
+	AbilityTriggers.Reset();
+}
+
+void UGA_MobaGroundTarget::PostLoad()
+{
+	Super::PostLoad();
+	bHoldToAim = true;
+	AbilityTriggers.Reset();
 }
 
 void UGA_MobaGroundTarget::ActivateAbility(
@@ -88,7 +84,8 @@ void UGA_MobaGroundTarget::ActivateAbility(
 	const FGameplayAbilityActivationInfo ActivationInfo,
 	const FGameplayEventData* TriggerEventData)
 {
-	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
+	// Do not Super: BP children of this class have empty K2_ActivateAbility /
+	// K2_ActivateAbilityFromEvent nodes. FromEvent with no payload ends the ability.
 
 	if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
 	{
@@ -122,26 +119,46 @@ void UGA_MobaGroundTarget::ActivateAbility(
 		PlayMontage->ReadyForActivation();
 	}
 
+	TArray<FGameplayTag> NotifyTags;
+	NotifyTags.Add(AnimNotifyTag);
+	NotifyTags.Add(ResolveNotifyTag(Character));
+	NotifyTags.Add(ResolveCooldownTag(Character));
+	NotifyTags.Add(FGameplayTag::RequestGameplayTag(FName("Ability.3"), false));
+	NotifyTags.Add(FGameplayTag::RequestGameplayTag(FName("Ability.4"), false));
+	NotifyTags.Add(FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget.Blast"), false));
+
+	TSet<FGameplayTag> UniqueTags;
+	for (const FGameplayTag& Tag : NotifyTags)
+	{
+		if (!Tag.IsValid() || UniqueTags.Contains(Tag))
+		{
+			continue;
+		}
+		UniqueTags.Add(Tag);
+		UAbilityTask_WaitGameplayEvent* WaitNotify = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(
+			this,
+			Tag,
+			nullptr,
+			true);
+		WaitNotify->EventReceived.AddDynamic(this, &UGA_MobaGroundTarget::OnAnimNotify);
+		WaitNotify->ReadyForActivation();
+	}
+
 	if (UWorld* World = Character->GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BlastTimer);
 		World->GetTimerManager().ClearTimer(CastFailsafeTimer);
-		const float Delay = GroundTargetMontage ? GroundBlastDelay(GroundTargetMontage) : 0.f;
-		if (Delay <= KINDA_SMALL_NUMBER)
-		{
-			FireBlast();
-		}
-		else
-		{
-			World->GetTimerManager().SetTimer(BlastTimer, this, &UGA_MobaGroundTarget::FireBlast, Delay, false);
-		}
 		World->GetTimerManager().SetTimer(
 			CastFailsafeTimer,
 			this,
 			&UGA_MobaGroundTarget::OnMontageDone,
-			2.5f,
+			GroundTargetMontage ? 2.0f : 0.05f,
 			false);
 	}
+}
+
+void UGA_MobaGroundTarget::OnAnimNotify(FGameplayEventData Payload)
+{
+	FireBlast();
 }
 
 void UGA_MobaGroundTarget::FireBlast()
@@ -154,9 +171,25 @@ void UGA_MobaGroundTarget::FireBlast()
 	bBlastedThisCast = true;
 
 	PlayCastSfxAt(PendingBlastLocation);
-	Character->PlayGroundBlastDebug(PendingBlastLocation, Radius, BlastLifetime);
+	ExecuteBlast();
+}
+
+void UGA_MobaGroundTarget::ExecuteBlast()
+{
+	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
+	if (!Character)
+	{
+		return;
+	}
+
+	Character->StopGroundAimDebug();
+	if (Character->IsLocallyControlled())
+	{
+		Character->PlayGroundBlastDebug(PendingBlastLocation, Radius, BlastLifetime);
+	}
 	if (Character->HasAuthority())
 	{
+		Character->MulticastGroundBlastVfx(PendingBlastLocation, Radius, BlastLifetime);
 		ApplyBlastDamage();
 	}
 }
@@ -200,37 +233,50 @@ void UGA_MobaGroundTarget::ApplyBlastDamage()
 {
 	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
 	UWorld* World = Character ? Character->GetWorld() : nullptr;
-	if (!World)
+	if (!World || !Character->HasAuthority())
 	{
 		return;
 	}
 
-	TArray<FOverlapResult> Overlaps;
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(MobaGroundBlast), false, Character);
-	FCollisionObjectQueryParams Objects;
-	Objects.AddObjectTypesToQuery(ECC_Pawn);
-	Objects.AddObjectTypesToQuery(ECC_WorldStatic);
-	Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
-	World->OverlapMultiByObjectType(
-		Overlaps,
-		PendingBlastLocation + FVector(0.f, 0.f, 80.f),
-		FQuat::Identity,
-		Objects,
-		FCollisionShape::MakeSphere(Radius),
-		Params);
+	FVector Origin = PendingBlastLocation;
+	if (Origin.IsNearlyZero())
+	{
+		Origin = Character->GetActorLocation();
+	}
+	const float HitRadius = FMath::Max(Radius, 80.f);
+	const float R2 = FMath::Square(HitRadius);
+	const float DamageAmount = Damage > 0.f ? Damage : 40.f;
 
 	TSet<AActor*> Damaged;
-	for (const FOverlapResult& Overlap : Overlaps)
+	auto TryHitActor = [this, Character, Origin, R2, DamageAmount, &Damaged](AActor* Target)
 	{
-		AActor* Target = Overlap.GetActor();
 		if (!IsValid(Target) || Target == Character || Damaged.Contains(Target))
 		{
-			continue;
+			return;
 		}
-		if (ApplyAbilityHit(Target, Damage, Damaged.Num() == 0))
+		FVector Delta = Target->GetActorLocation() - Origin;
+		Delta.Z = 0.f;
+		if (Delta.SizeSquared() > R2)
+		{
+			return;
+		}
+		if (ApplyAbilityHit(Target, DamageAmount, Damaged.Num() == 0))
 		{
 			Damaged.Add(Target);
 		}
+	};
+
+	for (TActorIterator<AMobaBaseCharacter> It(World); It; ++It)
+	{
+		TryHitActor(*It);
+	}
+	for (TActorIterator<AMobaMinion> It(World); It; ++It)
+	{
+		TryHitActor(*It);
+	}
+	for (TActorIterator<AMobaTower> It(World); It; ++It)
+	{
+		TryHitActor(*It);
 	}
 }
 
@@ -250,7 +296,6 @@ void UGA_MobaGroundTarget::OnMontageDone()
 		if (UWorld* World = Character->GetWorld())
 		{
 			World->GetTimerManager().ClearTimer(CastFailsafeTimer);
-			World->GetTimerManager().ClearTimer(BlastTimer);
 		}
 		Character->EndPlantedAbility();
 	}
@@ -269,7 +314,6 @@ void UGA_MobaGroundTarget::EndAbility(
 		if (UWorld* World = Character->GetWorld())
 		{
 			World->GetTimerManager().ClearTimer(CastFailsafeTimer);
-			World->GetTimerManager().ClearTimer(BlastTimer);
 		}
 		if (!bEndedThisCast)
 		{
@@ -314,19 +358,25 @@ void UGA_MobaGroundTarget::ConfirmHold(AMobaBaseCharacter* Avatar) const
 
 	Avatar->ClearAimRing();
 	Avatar->StopGroundAimDebug();
+	Avatar->SetPendingAbilityLocation(Location);
 
-	const FGameplayTag ActivateTag = FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget.Activate"), false);
-	FGameplayEventData EventData;
-	EventData.EventTag = ActivateTag;
-	EventData.Instigator = Avatar;
-	EventData.Target = Avatar;
-	EventData.TargetData = MakeLocationTargetData(Location);
-	Avatar->GetAbilitySystemComponent()->HandleGameplayEvent(ActivateTag, &EventData);
-	Avatar->StartCooldown(CooldownTag, Cooldown);
+	TSubclassOf<UGameplayAbility> Class = GetClass();
+	if (UAbilitySystemComponent* ASC = Avatar->GetAbilitySystemComponent())
+	{
+		if (!ASC->TryActivateAbilityByClass(Class))
+		{
+			const FGameplayTag CastingTag = FGameplayTag::RequestGameplayTag(FName("State.GroundCasting"), false);
+			if (CastingTag.IsValid())
+			{
+				ASC->RemoveLooseGameplayTag(CastingTag);
+			}
+			ASC->TryActivateAbilityByClass(Class);
+		}
+	}
 
 	if (!Avatar->HasAuthority())
 	{
-		Avatar->ServerConfirmGroundTarget(Location);
+		Avatar->ServerConfirmGroundTarget(Class, Location);
 	}
 }
 

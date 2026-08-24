@@ -9,7 +9,6 @@
 
 UGA_MobaDash::UGA_MobaDash()
 {
-	CooldownTag = FGameplayTag::RequestGameplayTag(FName("Cooldown.Dash"), false);
 	Cooldown = 3.f;
 	EnergyCost = 20.f;
 	DefaultCastSfx = EMobaSfx::Dash;

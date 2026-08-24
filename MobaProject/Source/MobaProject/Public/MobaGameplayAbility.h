@@ -35,16 +35,18 @@ public:
 	virtual void CancelHold(AMobaBaseCharacter* Avatar) const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
-	FGameplayTag CooldownTag;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
 	float Cooldown = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
 	float EnergyCost = 20.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability",
+		meta = (ToolTip = "Press/activate event. Dash and ground hold use this. Cooldown still comes from the character slot."))
 	FGameplayTag ActivateEventTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability", meta = (Categories = "Ability",
+		ToolTip = "Montage notify to wait for. Cooldown still comes from the character slot."))
+	FGameplayTag AnimNotifyTag;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
 	bool bSendMoveDirection = false;
@@ -57,6 +59,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
 	TArray<FMobaEffectSpec> Effects;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability",
+		meta = (ToolTip = "If off, this ability ignores towers. Bolts still collide with the building."))
+	bool bCanDamageTowers = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|SFX")
 	TObjectPtr<USoundBase> CastSound;
@@ -75,6 +81,8 @@ public:
 	void PlayHitSfx(const FVector& Location) const;
 
 	bool ApplyAbilityHit(AActor* Target, float InDamage, bool bApplySelfEffects = true) const;
+	FGameplayTag ResolveCooldownTag(const AActor* Avatar) const;
+	FGameplayTag ResolveNotifyTag(const AActor* Avatar) const;
 
 protected:
 	void ApplyMobaCooldown() const;

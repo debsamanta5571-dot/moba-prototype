@@ -1,5 +1,6 @@
 #include "MobaMinion.h"
 #include "AbilitySystemComponent.h"
+#include "GameFramework/DamageType.h"
 #include "AMobaPlayerState.h"
 #include "Animation/AnimationAsset.h"
 #include "Animation/AnimMontage.h"
@@ -81,11 +82,27 @@ AMobaMinion::AMobaMinion()
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
 	GetCapsuleComponent()->InitCapsuleSize(24.f, 48.f);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	GetCapsuleComponent()->SetGenerateOverlapEvents(true);
+	if (USkeletalMeshComponent* Skel = GetMesh())
+	{
+		Skel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Skel->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	}
 
 	bUseControllerRotationYaw = false;
-	GetCharacterMovement()->bOrientRotationToMovement = true;
-	GetCharacterMovement()->RotationRate = FRotator(0.f, 480.f, 0.f);
-	GetCharacterMovement()->MaxWalkSpeed = 320.f;
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	Move->bEnablePhysicsInteraction = false;
+	Move->MaxDepenetrationWithPawn = 200.f;
+	Move->MaxDepenetrationWithPawnAsProxy = 100.f;
+	Move->bOrientRotationToMovement = true;
+	Move->RotationRate = FRotator(0.f, 480.f, 0.f);
+	Move->MaxWalkSpeed = 320.f;
+	Move->bUseRVOAvoidance = true;
+	Move->AvoidanceConsiderationRadius = 180.f;
+	SetNetUpdateFrequency(30.f);
+	SetMinNetUpdateFrequency(15.f);
 
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
@@ -144,7 +161,17 @@ void AMobaMinion::BeginPlay()
 {
 	Super::BeginPlay();
 
-	GetCharacterMovement()->MaxWalkSpeed = MoveSpeed;
+	if (UCapsuleComponent* Cap = GetCapsuleComponent())
+	{
+		Cap->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		Cap->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+		Cap->SetGenerateOverlapEvents(true);
+	}
+	if (USkeletalMeshComponent* Skel = GetMesh())
+	{
+		Skel->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	}
+
 	if (AttributeSet)
 	{
 		AttributeSet->InitMaxHealth(MaxHealth);
@@ -153,6 +180,7 @@ void AMobaMinion::BeginPlay()
 		AttributeSet->InitMoveSpeed(MoveSpeed);
 		AttributeSet->InitDamageModifier(DamageModifier);
 		AttributeSet->InitDamageResistance(DamageResistance);
+		AttributeSet->InitCooldownReduction(0.f);
 	}
 	if (AbilitySystemComponent)
 	{
@@ -174,6 +202,7 @@ void AMobaMinion::BeginPlay()
 	{
 		GoalTower = FindEnemyTower();
 	}
+	RefreshMoveSpeed();
 }
 
 void AMobaMinion::Tick(float DeltaSeconds)
@@ -188,6 +217,12 @@ void AMobaMinion::Tick(float DeltaSeconds)
 
 void AMobaMinion::Think()
 {
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
 	if (GetHealth() <= 0.f)
 	{
 		HandleDeath();
@@ -199,7 +234,7 @@ void AMobaMinion::Think()
 		return;
 	}
 
-	if (GetWorld()->GetTimeSeconds() - LastAttackTime < AttackInterval)
+	if (World->GetTimeSeconds() - LastAttackTime < AttackInterval)
 	{
 		if (UCharacterMovementComponent* Move = GetCharacterMovement())
 		{
@@ -217,12 +252,28 @@ void AMobaMinion::Think()
 		Move->bOrientRotationToMovement = true;
 	}
 
+	if (AMobaBaseCharacter* Ignored = LeashIgnoredPlayer.Get())
+	{
+		if (!IsValid(Ignored)
+			|| Ignored->GetHealth() <= 0.f
+			|| Ignored->IsDead()
+			|| FVector::DistSquared(GetActorLocation(), Ignored->GetActorLocation()) > AggroRange * AggroRange)
+		{
+			LeashIgnoredPlayer.Reset();
+		}
+	}
+
+	if (HasFailedPlayerChase())
+	{
+		GiveUpPlayerChase();
+	}
+
 	AActor* Target = CombatTarget.Get();
 	const bool bKeepUnit = Target && !Cast<AMobaTower>(Target) && ShouldKeepTarget(Target);
 	if (!bKeepUnit)
 	{
 		Target = AcquireNewTarget();
-		CombatTarget = Target;
+		SetCombatTarget(Target);
 	}
 	if (!Target)
 	{
@@ -253,7 +304,52 @@ void AMobaMinion::NotifyDamagedBy(AActor* DamageCauser)
 	{
 		return;
 	}
-	CombatTarget = Hero;
+	SetCombatTarget(Hero);
+}
+
+void AMobaMinion::NotePlayerDamageFrom(AMobaBaseCharacter* Player)
+{
+	if (!HasAuthority() || !IsValid(Player))
+	{
+		return;
+	}
+
+	const float Window = FMath::Max(0.f, PlayerKillCreditSeconds);
+	if (Window <= KINDA_SMALL_NUMBER)
+	{
+		ClearPlayerKillCredit();
+		return;
+	}
+
+	LastPlayerDamager = Player;
+	PlayerKillCreditUntilTime = GetServerTimeSeconds() + Window;
+	GetWorldTimerManager().ClearTimer(PlayerKillCreditTimer);
+	GetWorldTimerManager().SetTimer(
+		PlayerKillCreditTimer,
+		this,
+		&AMobaMinion::ClearPlayerKillCredit,
+		Window,
+		false);
+}
+
+AMobaBaseCharacter* AMobaMinion::GetPlayerKillCredit() const
+{
+	if (IsTimerExpired(PlayerKillCreditUntilTime))
+	{
+		return nullptr;
+	}
+	AMobaBaseCharacter* Player = LastPlayerDamager.Get();
+	return IsValid(Player) ? Player : nullptr;
+}
+
+void AMobaMinion::ClearPlayerKillCredit()
+{
+	LastPlayerDamager.Reset();
+	PlayerKillCreditUntilTime = 0.f;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PlayerKillCreditTimer);
+	}
 }
 
 void AMobaMinion::TryAttack(AActor* Target)
@@ -263,13 +359,18 @@ void AMobaMinion::TryAttack(AActor* Target)
 		return;
 	}
 
-	const float Now = GetWorld()->GetTimeSeconds();
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	const float Now = World->GetTimeSeconds();
 	if (Now - LastAttackTime < AttackInterval)
 	{
 		return;
 	}
 	LastAttackTime = Now;
-	CombatTarget = Target;
+	SetCombatTarget(Target);
 	PendingAttackTarget = Target;
 
 	if (UCharacterMovementComponent* Move = GetCharacterMovement())
@@ -307,13 +408,9 @@ void AMobaMinion::FaceActor(AActor* Target)
 
 void AMobaMinion::DealAttackDamage()
 {
-	if (bDead)
-	{
-		return;
-	}
-
 	AActor* Target = PendingAttackTarget.Get();
-	if (!Target)
+	PendingAttackTarget.Reset();
+	if (!IsValid(Target) || !HasAuthority())
 	{
 		return;
 	}
@@ -323,7 +420,11 @@ void AMobaMinion::DealAttackDamage()
 		return;
 	}
 
-	AMobaBaseCharacter::ApplyMobaDamage(Target, AttackDamage, this);
+	if (AMobaBaseCharacter::ApplyMobaDamage(Target, AttackDamage, this)
+		&& ChasedPlayer.Get() == Target)
+	{
+		bDamagedChasedPlayer = true;
+	}
 }
 
 void AMobaMinion::ApplyStatus(const FMobaEffectSpec& Spec)
@@ -458,6 +559,10 @@ void AMobaMinion::SanitizeTimedState()
 	{
 		ClearHaste();
 	}
+	if (LastPlayerDamager.IsValid() && IsTimerExpired(PlayerKillCreditUntilTime))
+	{
+		ClearPlayerKillCredit();
+	}
 }
 
 void AMobaMinion::MulticastPlayAttack_Implementation()
@@ -485,6 +590,10 @@ AActor* AMobaMinion::FindClosestHero() const
 		{
 			continue;
 		}
+		if (LeashIgnoredPlayer.Get() == Hero)
+		{
+			continue;
+		}
 		const float DistSq = FVector::DistSquared(Here, Hero->GetActorLocation());
 		if (DistSq < BestDistSq)
 		{
@@ -496,10 +605,39 @@ AActor* AMobaMinion::FindClosestHero() const
 	return Best;
 }
 
+int32 AMobaMinion::CountAlliedMinionsTargeting(const AActor* Target) const
+{
+	if (!Target)
+	{
+		return 0;
+	}
+
+	int32 Count = 0;
+	for (TActorIterator<AMobaMinion> It(GetWorld()); It; ++It)
+	{
+		const AMobaMinion* Ally = *It;
+		if (!Ally || Ally == this || Ally->GetHealth() <= 0.f)
+		{
+			continue;
+		}
+		if (Ally->GetTeamId() != TeamID)
+		{
+			continue;
+		}
+		if (Ally->CombatTarget.Get() == Target)
+		{
+			++Count;
+		}
+	}
+	return Count;
+}
+
 AActor* AMobaMinion::FindClosestMinion() const
 {
 	AActor* Best = nullptr;
-	float BestDistSq = AggroRange * AggroRange;
+	int32 BestFocus = TNumericLimits<int32>::Max();
+	float BestDistSq = TNumericLimits<float>::Max();
+	const float RangeSq = AggroRange * AggroRange;
 	const FVector Here = GetActorLocation();
 
 	for (TActorIterator<AMobaMinion> It(GetWorld()); It; ++It)
@@ -514,8 +652,15 @@ AActor* AMobaMinion::FindClosestMinion() const
 			continue;
 		}
 		const float DistSq = FVector::DistSquared(Here, Other->GetActorLocation());
-		if (DistSq < BestDistSq)
+		if (DistSq > RangeSq)
 		{
+			continue;
+		}
+
+		const int32 Focus = CountAlliedMinionsTargeting(Other);
+		if (Focus < BestFocus || (Focus == BestFocus && DistSq < BestDistSq))
+		{
+			BestFocus = Focus;
 			BestDistSq = DistSq;
 			Best = Other;
 		}
@@ -641,7 +786,61 @@ bool AMobaMinion::ShouldKeepTarget(const AActor* Target) const
 	{
 		return false;
 	}
+	if (HasFailedPlayerChase() && Target == ChasedPlayer.Get())
+	{
+		return false;
+	}
 	return DistanceToAttackTarget(Target) <= AggroRange * 2.f;
+}
+
+void AMobaMinion::SetCombatTarget(AActor* Target)
+{
+	CombatTarget = Target;
+	RefreshPlayerChase(Target);
+}
+
+void AMobaMinion::RefreshPlayerChase(AActor* Target)
+{
+	AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(Target);
+	if (!Hero)
+	{
+		ChasedPlayer.Reset();
+		ChasePlayerStartTime = 0.f;
+		bDamagedChasedPlayer = false;
+		return;
+	}
+	if (ChasedPlayer.Get() != Hero)
+	{
+		ChasedPlayer = Hero;
+		ChasePlayerStartTime = GetServerTimeSeconds();
+		bDamagedChasedPlayer = false;
+	}
+}
+
+bool AMobaMinion::HasFailedPlayerChase() const
+{
+	AMobaBaseCharacter* Hero = ChasedPlayer.Get();
+	if (!Hero || bDamagedChasedPlayer || PlayerChaseGiveUpSeconds <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+	if (CombatTarget.Get() != Hero)
+	{
+		return false;
+	}
+	return GetServerTimeSeconds() - ChasePlayerStartTime >= PlayerChaseGiveUpSeconds;
+}
+
+void AMobaMinion::GiveUpPlayerChase()
+{
+	if (AMobaBaseCharacter* Hero = ChasedPlayer.Get())
+	{
+		LeashIgnoredPlayer = Hero;
+	}
+	ChasedPlayer.Reset();
+	ChasePlayerStartTime = 0.f;
+	bDamagedChasedPlayer = false;
+	CombatTarget.Reset();
 }
 
 AActor* AMobaMinion::AcquireNewTarget()
@@ -696,14 +895,15 @@ void AMobaMinion::OnRep_Dead()
 	}
 }
 
-void AMobaMinion::HandleDeath()
+void AMobaMinion::HandleDeath(AActor* Killer)
 {
 	if (bDead || !HasAuthority())
 	{
 		return;
 	}
+	AMobaBaseCharacter::AwardKillGold(this, Killer);
 	bDead = true;
-	GetWorldTimerManager().ClearTimer(AttackHitTimer);
+	ClearPlayerKillCredit();
 	GetWorldTimerManager().ClearTimer(StunTimer);
 	GetWorldTimerManager().ClearTimer(SlowTimer);
 	GetWorldTimerManager().ClearTimer(HasteTimer);
@@ -713,8 +913,11 @@ void AMobaMinion::HandleDeath()
 	StunUntilTime = 0.f;
 	SlowUntilTime = 0.f;
 	HasteUntilTime = 0.f;
-	PendingAttackTarget.Reset();
 	CombatTarget.Reset();
+	ChasedPlayer.Reset();
+	LeashIgnoredPlayer.Reset();
+	ChasePlayerStartTime = 0.f;
+	bDamagedChasedPlayer = false;
 	ApplyDeathPresentation();
 
 	float CorpseTime = 2.f;
@@ -723,4 +926,18 @@ void AMobaMinion::HandleDeath()
 		CorpseTime = FMath::Max(CorpseTime, Seq->GetPlayLength() + 0.4f);
 	}
 	SetLifeSpan(CorpseTime);
+}
+
+void AMobaMinion::FellOutOfWorld(const UDamageType& DmgType)
+{
+	(void)DmgType;
+	if (bDead)
+	{
+		return;
+	}
+	if (AttributeSet)
+	{
+		AttributeSet->SetHealth(0.f);
+	}
+	HandleDeath();
 }

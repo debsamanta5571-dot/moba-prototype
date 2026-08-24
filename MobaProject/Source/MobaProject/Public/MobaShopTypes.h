@@ -11,7 +11,8 @@ enum class EMobaShopStat : uint8
 	CooldownReduction,
 	Health,
 	DamageResistance,
-	MoveSpeed
+	MoveSpeed,
+	GoldRegen
 };
 
 USTRUCT(BlueprintType)

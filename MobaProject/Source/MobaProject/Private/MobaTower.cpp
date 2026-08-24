@@ -13,6 +13,7 @@
 #include "MobaMinion.h"
 #include "MobaProjectile.h"
 #include "MobaSfx.h"
+#include "MobaVictoryManager.h"
 #include "Net/UnrealNetwork.h"
 
 AMobaTower::AMobaTower()
@@ -66,6 +67,7 @@ void AMobaTower::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifeti
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AMobaTower, TeamID);
+	DOREPLIFETIME(AMobaTower, bDead);
 }
 
 UAbilitySystemComponent* AMobaTower::GetAbilitySystemComponent() const
@@ -190,6 +192,7 @@ void AMobaTower::BeginPlay()
 		AttributeSet->InitHealth(MaxHealth);
 		AttributeSet->InitDamageModifier(DamageModifier);
 		AttributeSet->InitDamageResistance(DamageResistance);
+		AttributeSet->InitMoveSpeed(MoveSpeed);
 		AttributeSet->InitGoldOnKill(GoldOnKill);
 	}
 	if (AbilitySystemComponent)
@@ -225,7 +228,7 @@ void AMobaTower::Fire()
 	}
 
 	AActor* Target = FindClosestEnemy();
-	if (!Target || !ProjectileClass)
+	if (!Target || !ProjectileClass || !GetWorld())
 	{
 		return;
 	}
@@ -248,7 +251,9 @@ void AMobaTower::Fire()
 		Dir.Rotation(),
 		Params))
 	{
-		Bolt->InitFlight(Dir, ProjectileSpeed, Damage, ProjectileLifetime, false);
+		const float Dist = FVector::Dist(Start, Target->GetActorLocation());
+		const float Life = FMath::Max(ProjectileLifetime, Dist / FMath::Max(ProjectileSpeed, 1.f) + 2.5f);
+		Bolt->InitHoming(Target, ProjectileSpeed, Damage, Life);
 	}
 
 	MulticastFireSfx();
@@ -256,10 +261,6 @@ void AMobaTower::Fire()
 
 void AMobaTower::MulticastFireSfx_Implementation()
 {
-	if (GetNetMode() == NM_DedicatedServer)
-	{
-		return;
-	}
 	const FVector Loc = FirePoint ? FirePoint->GetComponentLocation() : GetActorLocation();
 	UMobaSfx::Play(this, FireSound, EMobaSfx::TowerFire, Loc);
 }
@@ -306,6 +307,20 @@ AActor* AMobaTower::FindClosestEnemy() const
 	return Best;
 }
 
+void AMobaTower::OnRep_Dead()
+{
+	if (!bDead)
+	{
+		return;
+	}
+	GetWorldTimerManager().ClearTimer(FireTimer);
+	SetActorEnableCollision(false);
+	if (HealthWidget)
+	{
+		HealthWidget->SetHiddenInGame(true);
+	}
+}
+
 void AMobaTower::HandleDeath()
 {
 	if (bDead)
@@ -313,10 +328,12 @@ void AMobaTower::HandleDeath()
 		return;
 	}
 	bDead = true;
-	GetWorldTimerManager().ClearTimer(FireTimer);
-	SetActorEnableCollision(false);
-	if (HealthWidget)
+	OnRep_Dead();
+	if (HasAuthority() && GetWorld())
 	{
-		HealthWidget->SetHiddenInGame(true);
+		for (TActorIterator<AMobaVictoryManager> It(GetWorld()); It; ++It)
+		{
+			It->NotifyTowerDestroyed(this);
+		}
 	}
 }

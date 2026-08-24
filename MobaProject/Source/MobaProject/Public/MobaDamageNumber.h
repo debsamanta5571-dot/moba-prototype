@@ -15,7 +15,7 @@ class MOBAPROJECT_API UMobaDamageNumberWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	void SetAmount(float Amount);
+	void SetAmount(float Amount, bool bInGold = false);
 	void SetFade(float Alpha);
 
 protected:
@@ -23,11 +23,13 @@ protected:
 	virtual void NativeConstruct() override;
 
 	void ApplyAmount();
+	FLinearColor GetLabelColor(float Alpha) const;
 
 	UPROPERTY()
 	TObjectPtr<UTextBlock> Label;
 
 	float StoredAmount = 0.f;
+	bool bGold = false;
 };
 
 UCLASS()
@@ -38,7 +40,7 @@ class MOBAPROJECT_API AMobaDamageNumber : public AActor
 public:
 	AMobaDamageNumber();
 
-	void Init(float Amount);
+	void Init(float Amount, bool bInGold = false);
 
 protected:
 	virtual void BeginPlay() override;
@@ -56,4 +58,5 @@ protected:
 	float Lifetime = 0.9f;
 	float RiseSpeed = 90.f;
 	float PendingAmount = 0.f;
+	bool bGold = false;
 };

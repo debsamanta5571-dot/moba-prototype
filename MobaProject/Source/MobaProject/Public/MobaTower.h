@@ -27,12 +27,14 @@ public:
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
 	int32 GetTeamId() const { return TeamID; }
+	float GetMinionMaxHealthDamage() const { return MinionMaxHealthDamage; }
 	const UPrimitiveComponent* GetBlockingCollision() const;
 
 	UFUNCTION(BlueprintPure, Category = "Moba")
 	float GetHealth() const;
 
 	void HandleDeath();
+	bool IsDead() const { return bDead; }
 
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -90,10 +92,14 @@ protected:
 	TObjectPtr<USoundBase> FireSound;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
-	float MaxHealth = 500.f;
+	float MaxHealth = 1000.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
-	float Damage = 25.f;
+	float Damage = 150.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes",
+		meta = (ClampMin = "0.0", ClampMax = "1.0", ToolTip = "Fraction of a minion's max health dealt per tower shot. Ignores damage modifier and resistance."))
+	float MinionMaxHealthDamage = 0.4f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
 	float DamageModifier = 1.f;
@@ -102,8 +108,16 @@ protected:
 	float DamageResistance = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
+	float MoveSpeed = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
 	float GoldOnKill = 0.f;
 
 	FTimerHandle FireTimer;
+
+	UFUNCTION()
+	void OnRep_Dead();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Dead)
 	bool bDead = false;
 };

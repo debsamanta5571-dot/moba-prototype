@@ -6,6 +6,7 @@
 #include "MobaEffect.h"
 #include "MobaMinion.generated.h"
 
+class AMobaBaseCharacter;
 class AMobaTower;
 class UAbilitySystemComponent;
 class UAnimationAsset;
@@ -42,11 +43,16 @@ public:
 	bool IsStunned() const { return bStunned; }
 	bool IsSlowed() const { return SlowMul < 0.99f; }
 	void NotifyDamagedBy(AActor* DamageCauser);
-	void HandleDeath();
+	void NotePlayerDamageFrom(AMobaBaseCharacter* Player);
+	AMobaBaseCharacter* GetPlayerKillCredit() const;
+	void ClearPlayerKillCredit();
+	void HandleDeath(AActor* Killer = nullptr);
+	void RefreshMoveSpeed();
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void FellOutOfWorld(const UDamageType& DmgType) override;
 
 	void Think();
 	void Engage(AActor* Target);
@@ -63,6 +69,11 @@ protected:
 	bool IsValidCombatTarget(const AActor* Target) const;
 	bool ShouldKeepTarget(const AActor* Target) const;
 	AActor* AcquireNewTarget();
+	int32 CountAlliedMinionsTargeting(const AActor* Target) const;
+	void SetCombatTarget(AActor* Target);
+	void RefreshPlayerChase(AActor* Target);
+	bool HasFailedPlayerChase() const;
+	void GiveUpPlayerChase();
 
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastPlayAttack();
@@ -91,6 +102,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
 	float AggroRange = 500.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba", meta = (ClampMin = "0.0"))
+	float PlayerChaseGiveUpSeconds = 8.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
 	float AttackRange = 160.f;
 
@@ -107,13 +121,16 @@ protected:
 	float AttackHitDelay = 0.35f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
-	float MaxHealth = 80.f;
+	float MaxHealth = 200.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
-	float AttackDamage = 12.f;
+	float AttackDamage = 24.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
 	float GoldOnKill = 10.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba", meta = (ClampMin = "0.0"))
+	float PlayerKillCreditSeconds = 15.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
 	float MoveSpeed = 320.f;
@@ -124,7 +141,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes", meta = (ClampMin = "0.0", ClampMax = "0.9"))
 	float DamageResistance = 0.f;
 
-	void RefreshMoveSpeed();
 	void ClearStun();
 	void ClearSlow();
 	void ClearHaste();
@@ -155,7 +171,14 @@ protected:
 	FTimerHandle StunTimer;
 	FTimerHandle SlowTimer;
 	FTimerHandle HasteTimer;
+	FTimerHandle PlayerKillCreditTimer;
+	TWeakObjectPtr<AMobaBaseCharacter> LastPlayerDamager;
+	float PlayerKillCreditUntilTime = 0.f;
 	TWeakObjectPtr<AActor> PendingAttackTarget;
 	TWeakObjectPtr<AActor> CombatTarget;
+	TWeakObjectPtr<AMobaBaseCharacter> ChasedPlayer;
+	TWeakObjectPtr<AMobaBaseCharacter> LeashIgnoredPlayer;
+	float ChasePlayerStartTime = 0.f;
+	bool bDamagedChasedPlayer = false;
 	FTimerHandle AttackHitTimer;
 };

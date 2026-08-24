@@ -6,11 +6,19 @@
 
 class UButton;
 class UEditableTextBox;
+class UTextBlock;
 
 UCLASS()
 class MOBAPROJECT_API UMobaMenuWidget : public UUserWidget
 {
 	GENERATED_BODY()
+
+public:
+	void SetNotice(const FString& Message);
+	void FocusJoinAddress();
+	FString GetJoinAddress() const;
+	FString GetJoinHost() const;
+	int32 GetJoinPort() const;
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -22,6 +30,12 @@ protected:
 	UFUNCTION()
 	void OnJoinClicked();
 
+	UFUNCTION()
+	void OnJoinAddressCommitted(const FText& Text, ETextCommit::Type CommitMethod);
+
+	UFUNCTION()
+	void OnSettingsClicked();
+
 	UPROPERTY()
 	TObjectPtr<UButton> HostButton;
 
@@ -29,5 +43,14 @@ protected:
 	TObjectPtr<UButton> JoinButton;
 
 	UPROPERTY()
+	TObjectPtr<UButton> SettingsButton;
+
+	UPROPERTY()
 	TObjectPtr<UEditableTextBox> AddressBox;
+
+	UPROPERTY()
+	TObjectPtr<UEditableTextBox> PortBox;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> NoticeText;
 };

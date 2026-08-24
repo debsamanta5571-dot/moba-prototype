@@ -1,15 +1,17 @@
 #include "MobaShop.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/TextRenderComponent.h"
-#include "Engine/StaticMesh.h"
+#include "EngineUtils.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
 #include "MobaBaseCharacter.h"
+#include "Net/UnrealNetwork.h"
 
 AMobaShop::AMobaShop()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
+	bAlwaysRelevant = true;
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -24,51 +26,76 @@ AMobaShop::AMobaShop()
 	Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	Capsule->SetGenerateOverlapEvents(true);
 	Capsule->SetHiddenInGame(false);
+	Capsule->SetCanEverAffectNavigation(false);
+}
 
-	Label = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Label"));
-	Label->SetupAttachment(SceneRoot);
-	Label->SetRelativeLocation(FVector(0.f, 0.f, 220.f));
-	Label->SetHorizontalAlignment(EHTA_Center);
-	Label->SetVerticalAlignment(EVRTA_TextCenter);
-	Label->SetWorldSize(48.f);
-	Label->SetTextRenderColor(FColor(242, 209, 71));
-	Label->SetText(FText::FromString(TEXT("SHOP")));
+void AMobaShop::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AMobaShop, TeamID);
+}
 
-	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
-	Mesh->SetupAttachment(SceneRoot);
-	Mesh->SetRelativeLocation(FVector(0.f, 0.f, 20.f));
-	Mesh->SetRelativeScale3D(FVector(10.f, 10.f, 0.4f));
-	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Mesh->SetCastShadow(false);
+bool AMobaShop::ContainsPawn(const APawn* Pawn) const
+{
+	if (!Pawn || !Capsule)
+	{
+		return false;
+	}
+
+	FVector HeroCenter = Pawn->GetActorLocation();
+	float HeroRadius = 42.f;
+	float HeroHalfHeight = 96.f;
+	if (const ACharacter* Character = Cast<ACharacter>(Pawn))
+	{
+		if (const UCapsuleComponent* HeroCap = Character->GetCapsuleComponent())
+		{
+			HeroCenter = HeroCap->GetComponentLocation();
+			HeroRadius = HeroCap->GetScaledCapsuleRadius();
+			HeroHalfHeight = HeroCap->GetScaledCapsuleHalfHeight();
+		}
+	}
+
+	const FVector ShopCenter = Capsule->GetComponentLocation();
+	const float ShopRadius = Capsule->GetScaledCapsuleRadius();
+	const float ShopHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const float Combined = ShopRadius + HeroRadius;
+	const float DistSq2D = (ShopCenter - HeroCenter).SizeSquared2D();
+	if (DistSq2D > Combined * Combined)
+	{
+		return false;
+	}
+
+	const float ShopMin = ShopCenter.Z - ShopHalfHeight;
+	const float ShopMax = ShopCenter.Z + ShopHalfHeight;
+	const float HeroMin = HeroCenter.Z - HeroHalfHeight;
+	const float HeroMax = HeroCenter.Z + HeroHalfHeight;
+	const float ZGap = FMath::Max(0.f, FMath::Max(ShopMin - HeroMax, HeroMin - ShopMax));
+	return DistSq2D + ZGap * ZGap <= Combined * Combined;
 }
 
 void AMobaShop::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (Mesh && !Mesh->GetStaticMesh())
-	{
-		if (UStaticMesh* Cylinder = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder")))
-		{
-			Mesh->SetStaticMesh(Cylinder);
-		}
-	}
-
 	if (!Capsule)
 	{
 		return;
 	}
 
+	Capsule->SetCollisionObjectType(ECC_WorldDynamic);
+	Capsule->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Capsule->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	Capsule->SetGenerateOverlapEvents(true);
 	Capsule->OnComponentBeginOverlap.AddDynamic(this, &AMobaShop::OnBeginOverlap);
 	Capsule->OnComponentEndOverlap.AddDynamic(this, &AMobaShop::OnEndOverlap);
+	Capsule->UpdateOverlaps();
 
-	TArray<AActor*> Overlapping;
-	Capsule->GetOverlappingActors(Overlapping, AMobaBaseCharacter::StaticClass());
-	for (AActor* Actor : Overlapping)
+	for (TActorIterator<AMobaBaseCharacter> It(GetWorld()); It; ++It)
 	{
-		if (AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(Actor))
+		if (AMobaBaseCharacter* Hero = *It)
 		{
-			Hero->NotifyEnteredShop();
+			Hero->ScheduleShopRangeRefresh();
 		}
 	}
 }
@@ -83,7 +110,7 @@ void AMobaShop::OnBeginOverlap(
 {
 	if (AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(OtherActor))
 	{
-		Hero->NotifyEnteredShop();
+		Hero->RefreshShopRange();
 	}
 }
 
@@ -95,6 +122,6 @@ void AMobaShop::OnEndOverlap(
 {
 	if (AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(OtherActor))
 	{
-		Hero->NotifyLeftShop();
+		Hero->RefreshShopRange();
 	}
 }

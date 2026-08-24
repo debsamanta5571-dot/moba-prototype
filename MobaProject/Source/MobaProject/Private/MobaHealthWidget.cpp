@@ -54,6 +54,10 @@ void UMobaHealthWidget::SetOwnerCharacter(AMobaBaseCharacter* InOwner)
 
 TSharedRef<SWidget> UMobaHealthWidget::RebuildWidget()
 {
+	if (!WidgetTree)
+	{
+		WidgetTree = NewObject<UWidgetTree>(this, TEXT("WidgetTree"), RF_Transient);
+	}
 	if (WidgetTree && !WidgetTree->RootWidget)
 	{
 		UOverlay* Root = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("Root"));
@@ -104,7 +108,7 @@ void UMobaHealthWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
-	if (!OwnerActor)
+	if (!IsValid(OwnerActor))
 	{
 		return;
 	}
@@ -137,7 +141,7 @@ void UMobaHealthWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 
 void UMobaHealthWidget::UpdateStatus()
 {
-	if (!OwnerActor)
+	if (!IsValid(OwnerActor))
 	{
 		return;
 	}

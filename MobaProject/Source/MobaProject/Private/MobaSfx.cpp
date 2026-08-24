@@ -1,8 +1,7 @@
 #include "MobaSfx.h"
 #include "Components/AudioComponent.h"
-#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "MobaBaseCharacter.h"
+#include "MobaGameInstance.h"
 #include "Sound/SoundAttenuation.h"
 #include "Sound/SoundGroups.h"
 #include "Sound/SoundWaveProcedural.h"
@@ -99,10 +98,6 @@ namespace
 			const float Spark = Synth.Noise() * FMath::Exp(-T * 36.f);
 			return (Pop * 0.45f + Spark * 0.55f) * 0.75f;
 		}
-		case EMobaSfx::MinionAttack:
-			return Punch(T, Synth, 1.35f) * 0.72f;
-		case EMobaSfx::MinionHit:
-			return Punch(T, Synth, 1.52f) * 0.68f;
 		case EMobaSfx::TowerFire:
 		{
 			const float Thump = FMath::Sin(2.f * PI * 46.f * T) * FMath::Exp(-T * 9.f);
@@ -120,13 +115,11 @@ namespace
 		switch (Kind)
 		{
 		case EMobaSfx::MeleeCast: return 0.14f;
-		case EMobaSfx::MeleeHit: return 0.22f;
+		case EMobaSfx::MeleeHit: return 0.18f;
 		case EMobaSfx::Dash: return 0.28f;
 		case EMobaSfx::SkillshotFire: return 0.15f;
 		case EMobaSfx::GroundBlast: return 0.78f;
 		case EMobaSfx::ProjectileDestroy: return 0.09f;
-		case EMobaSfx::MinionAttack: return 0.14f;
-		case EMobaSfx::MinionHit: return 0.16f;
 		case EMobaSfx::TowerFire: return 0.28f;
 		default: return 0.f;
 		}
@@ -152,10 +145,10 @@ namespace
 		for (int32 i = 0; i < NumSamples; ++i)
 		{
 			const float S = FMath::Clamp(SampleSfx(Kind, i * Dt, Synth), -1.f, 1.f);
-			Out[i] = static_cast<int16>(S * 27000.f);
+			Out[i] = static_cast<int16>(S * 26000.f);
 		}
 
-		USoundWaveProcedural* Wave = NewObject<USoundWaveProcedural>();
+		USoundWaveProcedural* Wave = NewObject<USoundWaveProcedural>(GetTransientPackage());
 		Wave->SetSampleRate(SampleRate);
 		Wave->NumChannels = 1;
 		Wave->Duration = Duration;
@@ -175,57 +168,12 @@ namespace
 			Attn->Attenuation.bSpatialize = true;
 			Attn->Attenuation.DistanceAlgorithm = EAttenuationDistanceModel::Linear;
 			Attn->Attenuation.AttenuationShape = EAttenuationShape::Sphere;
-			Attn->Attenuation.AttenuationShapeExtents = FVector(700.f, 0.f, 0.f);
-			Attn->Attenuation.FalloffDistance = 10000.f;
+			Attn->Attenuation.AttenuationShapeExtents = FVector(280.f, 0.f, 0.f);
+			Attn->Attenuation.FalloffDistance = 3200.f;
 			Cached.Reset(Attn);
 		}
 		return Cached.Get();
 	}
-}
-
-void UMobaSfx::ToggleMute(const UObject* WorldContext)
-{
-	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
-	if (!World)
-	{
-		return;
-	}
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		APlayerController* PC = It->Get();
-		if (PC && PC->IsLocalController())
-		{
-			if (AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(PC->GetPawn()))
-			{
-				Hero->ToggleMuteSfx();
-				return;
-			}
-		}
-	}
-}
-
-bool UMobaSfx::IsMuted(const UObject* WorldContext)
-{
-	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
-	if (!World)
-	{
-		return false;
-	}
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		const APlayerController* PC = It->Get();
-		if (PC && PC->IsLocalController())
-		{
-			if (const AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(PC->GetPawn()))
-			{
-				if (Hero->IsSfxMuted())
-				{
-					return true;
-				}
-			}
-		}
-	}
-	return false;
 }
 
 void UMobaSfx::Play(
@@ -235,13 +183,13 @@ void UMobaSfx::Play(
 	const FVector& Location)
 {
 	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
-	if (!World || World->GetNetMode() == NM_DedicatedServer)
+	if (!World || World->bIsTearingDown || World->GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
 
 	USoundWaveProcedural* Wave = nullptr;
-	USoundBase* Sound = Override;
+	USoundBase* Sound = IsValid(Override) ? Override : nullptr;
 	if (!Sound)
 	{
 		Wave = MakeWave(Fallback);
@@ -252,16 +200,22 @@ void UMobaSfx::Play(
 		return;
 	}
 
+	float Volume = 0.5f;
+	if (const UMobaGameInstance* GI = World->GetGameInstance<UMobaGameInstance>())
+	{
+		Volume = GI->GetMasterVolume();
+	}
+
 	UAudioComponent* Comp = UGameplayStatics::SpawnSoundAtLocation(
 		World,
 		Sound,
 		Location,
 		FRotator::ZeroRotator,
-		1.f,
+		Volume,
 		1.f,
 		0.f,
-		GetAttenuation());
-	if (Wave && Comp)
+		Wave ? GetAttenuation() : nullptr);
+	if (Wave && IsValid(Comp))
 	{
 		Wave->Rename(nullptr, Comp);
 	}

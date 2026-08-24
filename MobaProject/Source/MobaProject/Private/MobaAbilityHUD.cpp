@@ -13,7 +13,11 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/NetConnection.h"
 #include "Engine/Texture2D.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "MobaBaseCharacter.h"
 #include "MobaGameplayAbility.h"
 #include "Styling/CoreStyle.h"
@@ -26,8 +30,6 @@ namespace
 		FLinearColor(0.86f, 0.72f, 0.22f, 1.f),
 		FLinearColor(0.28f, 0.68f, 0.40f, 1.f)
 	};
-
-	const TCHAR* SlotKeys[4] = { TEXT("LMB"), TEXT("Q"), TEXT("SHIFT"), TEXT("E") };
 }
 
 UMobaAbilityHUD::UMobaAbilityHUD(const FObjectInitializer& ObjectInitializer)
@@ -39,6 +41,7 @@ UMobaAbilityHUD::UMobaAbilityHUD(const FObjectInitializer& ObjectInitializer)
 void UMobaAbilityHUD::SetOwnerCharacter(AMobaBaseCharacter* InOwner)
 {
 	OwnerCharacter = InOwner;
+	FillAbilityIcons();
 	UpdateSlots();
 }
 
@@ -121,6 +124,24 @@ void UMobaAbilityHUD::RebuildSlots()
 	{
 		NoticeSlot->SetHorizontalAlignment(HAlign_Center);
 		NoticeSlot->SetVerticalAlignment(VAlign_Center);
+	}
+
+	PingFrame = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PingFrame"));
+	PingFrame->SetBrushColor(FLinearColor(0.05f, 0.06f, 0.08f, 0.88f));
+	PingFrame->SetPadding(FMargin(12.f, 6.f));
+	PingFrame->SetVisibility(ESlateVisibility::Collapsed);
+	PingText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("PingText"));
+	PingText->SetJustification(ETextJustify::Right);
+	PingText->SetColorAndOpacity(FSlateColor(FLinearColor(0.78f, 0.67f, 0.43f, 1.f)));
+	PingText->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 16));
+	PingText->SetText(FText::FromString(TEXT("-- ms")));
+	PingText->SetVisibility(ESlateVisibility::HitTestInvisible);
+	PingFrame->AddChild(PingText);
+	if (UOverlaySlot* PingSlot = Root->AddChildToOverlay(PingFrame))
+	{
+		PingSlot->SetHorizontalAlignment(HAlign_Right);
+		PingSlot->SetVerticalAlignment(VAlign_Top);
+		PingSlot->SetPadding(FMargin(0.f, 24.f, 28.f, 0.f));
 	}
 
 	USizeBox* HealthSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("HealthSize"));
@@ -217,13 +238,29 @@ void UMobaAbilityHUD::RebuildSlots()
 		EnergySlot->SetHorizontalAlignment(HAlign_Fill);
 	}
 
-	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Row"));
-	if (UVerticalBoxSlot* RowSlot = HudStack->AddChildToVerticalBox(Row))
+	SlotRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Row"));
+	if (UVerticalBoxSlot* RowSlot = HudStack->AddChildToVerticalBox(SlotRow))
 	{
 		RowSlot->SetHorizontalAlignment(HAlign_Right);
 	}
 
-	for (int32 i = 0; i < 4; ++i)
+	FillAbilityIcons();
+}
+
+void UMobaAbilityHUD::FillAbilityIcons()
+{
+	if (!WidgetTree || !SlotRow)
+	{
+		return;
+	}
+
+	SlotRow->ClearChildren();
+	Icons.Reset();
+	CooldownBars.Reset();
+	TimeTexts.Reset();
+
+	const int32 NumSlots = OwnerCharacter ? OwnerCharacter->GetAbilitySlotCount() : 4;
+	for (int32 i = 0; i < NumSlots; ++i)
 	{
 		UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>(
 			UVerticalBox::StaticClass(),
@@ -258,7 +295,7 @@ void UMobaAbilityHUD::RebuildSlots()
 		{
 			Icon->SetBrush(*White);
 		}
-		Icon->SetColorAndOpacity(SlotColors[i]);
+		Icon->SetColorAndOpacity(SlotColors[i % 4]);
 		if (UOverlaySlot* IconSlot = Overlay->AddChildToOverlay(Icon))
 		{
 			IconSlot->SetHorizontalAlignment(HAlign_Fill);
@@ -297,12 +334,15 @@ void UMobaAbilityHUD::RebuildSlots()
 		Key->SetJustification(ETextJustify::Center);
 		Key->SetColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.74f, 0.78f, 1.f)));
 		Key->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 11));
-		Key->SetText(FText::FromString(SlotKeys[i]));
+		const FString KeyLabel = OwnerCharacter
+			? OwnerCharacter->GetAbilityKeyLabel(i)
+			: FString::FromInt(i + 1);
+		Key->SetText(FText::FromString(KeyLabel));
 
 		Column->AddChildToVerticalBox(IconSize);
 		Column->AddChildToVerticalBox(Key);
 
-		if (UHorizontalBoxSlot* BoxSlot = Row->AddChildToHorizontalBox(Column))
+		if (UHorizontalBoxSlot* BoxSlot = SlotRow->AddChildToHorizontalBox(Column))
 		{
 			BoxSlot->SetPadding(FMargin(6.f, 0.f));
 			BoxSlot->SetVerticalAlignment(VAlign_Bottom);
@@ -324,6 +364,7 @@ void UMobaAbilityHUD::NativeConstruct()
 	UpdateHealth();
 	UpdateEnergy();
 	UpdateSlots();
+	UpdatePing();
 }
 
 void UMobaAbilityHUD::ShowNotice(const FString& Message)
@@ -340,6 +381,10 @@ void UMobaAbilityHUD::ShowNotice(const FString& Message)
 void UMobaAbilityHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (!IsValid(OwnerCharacter))
+	{
+		return;
+	}
 	if (NoticeFrame && NoticeUntilTime > 0.f && GetWorld() && GetWorld()->GetTimeSeconds() >= NoticeUntilTime)
 	{
 		NoticeFrame->SetVisibility(ESlateVisibility::Collapsed);
@@ -349,6 +394,15 @@ void UMobaAbilityHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	UpdateHealth();
 	UpdateEnergy();
 	UpdateSlots();
+	UpdatePing();
+}
+
+void UMobaAbilityHUD::UpdatePing()
+{
+	if (PingFrame)
+	{
+		PingFrame->SetVisibility(ESlateVisibility::Collapsed);
+	}
 }
 
 void UMobaAbilityHUD::UpdateHealth()
@@ -409,14 +463,14 @@ void UMobaAbilityHUD::UpdateEnergy()
 
 void UMobaAbilityHUD::UpdateSlots()
 {
-	if (Icons.Num() != 4 || !OwnerCharacter)
+	if (!OwnerCharacter || Icons.Num() == 0)
 	{
 		return;
 	}
 
 	const bool bDead = OwnerCharacter->IsDead();
-
-	for (int32 i = 0; i < 4; ++i)
+	const int32 Num = Icons.Num();
+	for (int32 i = 0; i < Num; ++i)
 	{
 		UTexture2D* IconTex = nullptr;
 		float Remaining = 0.f;
@@ -430,7 +484,7 @@ void UMobaAbilityHUD::UpdateSlots()
 		}
 		else
 		{
-			Icons[i]->SetColorAndOpacity(SlotColors[i]);
+			Icons[i]->SetColorAndOpacity(SlotColors[i % 4]);
 		}
 
 		const bool bOnCooldown = Remaining > 0.05f && Duration > 0.f;

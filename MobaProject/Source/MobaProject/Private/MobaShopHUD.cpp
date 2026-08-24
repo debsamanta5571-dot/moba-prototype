@@ -60,7 +60,7 @@ void UMobaShopHUD::PlaceInViewport()
 	ViewportSlot.Anchors = FAnchors(0.5f, 0.5f, 0.5f, 0.5f);
 	ViewportSlot.Alignment = FVector2D(0.5f, 0.5f);
 	ViewportSlot.Offsets = FMargin(0.f, 0.f, 420.f, 460.f);
-	ViewportSlot.ZOrder = 80;
+	ViewportSlot.ZOrder = 120;
 
 	UGameViewportSubsystem* Viewport = UGameViewportSubsystem::Get();
 	ULocalPlayer* LocalPlayer = GetOwningLocalPlayer();
@@ -79,7 +79,7 @@ void UMobaShopHUD::PlaceInViewport()
 
 	if (!IsInViewport())
 	{
-		AddToPlayerScreen(80);
+		AddToPlayerScreen(120);
 	}
 	SetAnchorsInViewport(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
 	SetAlignmentInViewport(FVector2D(0.5f, 0.5f));
@@ -157,7 +157,7 @@ void UMobaShopHUD::RebuildOffers()
 	StatusText->SetJustification(ETextJustify::Center);
 	StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.74f, 0.78f, 1.f)));
 	StatusText->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 11));
-	StatusText->SetText(FText::FromString(TEXT("Buy while dead or at the shop")));
+	StatusText->SetText(FText::FromString(TEXT("In your team's shop, or while dead")));
 	if (UVerticalBoxSlot* StatusSlot = Root->AddChildToVerticalBox(StatusText))
 	{
 		StatusSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
@@ -292,12 +292,12 @@ void UMobaShopHUD::UpdateOffers()
 	{
 		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.35f, 0.82f, 0.45f, 1.f)));
 		StatusText->SetText(FText::FromString(
-			OwnerCharacter->IsDead() ? TEXT("Dead — shop available") : TEXT("In shop range")));
+			OwnerCharacter->IsDead() ? TEXT("Dead. Shop available") : TEXT("In your team's shop")));
 	}
 	else
 	{
 		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.82f, 0.4f, 0.35f, 1.f)));
-		StatusText->SetText(FText::FromString(TEXT("Walk into the shop, or shop while dead")));
+		StatusText->SetText(FText::FromString(TEXT("Walk into your shop, or shop while dead")));
 	}
 
 	const TArray<FMobaShopOffer>& Offers = OwnerCharacter->GetShopOffers();

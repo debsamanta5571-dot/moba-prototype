@@ -5,6 +5,7 @@
 #include "MobaGoldHUD.generated.h"
 
 class AMobaBaseCharacter;
+class UBorder;
 class UTextBlock;
 
 UCLASS()
@@ -31,4 +32,10 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UTextBlock> GoldText;
+
+	UPROPERTY()
+	TObjectPtr<UBorder> BuyKeyFrame;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> BuyKeyText;
 };

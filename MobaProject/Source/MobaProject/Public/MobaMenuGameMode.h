@@ -4,8 +4,6 @@
 #include "GameFramework/GameModeBase.h"
 #include "MobaMenuGameMode.generated.h"
 
-class UMobaMenuWidget;
-
 UCLASS()
 class MOBAPROJECT_API AMobaMenuGameMode : public AGameModeBase
 {
@@ -14,9 +12,13 @@ class MOBAPROJECT_API AMobaMenuGameMode : public AGameModeBase
 public:
 	AMobaMenuGameMode();
 
+	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
+	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+
 protected:
 	virtual void BeginPlay() override;
 
-	UPROPERTY()
-	TObjectPtr<UMobaMenuWidget> MenuWidget;
+	void AssignLobbyTeam(AController* Player);
+
+	int32 NextJoinTeam = 1;
 };

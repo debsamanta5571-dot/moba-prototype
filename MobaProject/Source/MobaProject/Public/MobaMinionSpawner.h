@@ -20,6 +20,9 @@ protected:
 
 	void SpawnWave();
 
+	UFUNCTION()
+	void TryStartWaves();
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
 	TSubclassOf<AMobaMinion> MinionClass;
 
@@ -36,4 +39,5 @@ protected:
 	float WaveInterval = 20.f;
 
 	FTimerHandle WaveTimer;
+	FTimerHandle WaitMatchTimer;
 };

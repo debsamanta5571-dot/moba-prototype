@@ -29,7 +29,7 @@ void UMobaGoldHUD::PlaceInViewport()
 	FGameViewportWidgetSlot ViewportSlot;
 	ViewportSlot.Anchors = FAnchors(1.f, 0.22f, 1.f, 0.22f);
 	ViewportSlot.Alignment = FVector2D(1.f, 0.5f);
-	ViewportSlot.Offsets = FMargin(-28.f, 0.f, 210.f, 52.f);
+	ViewportSlot.Offsets = FMargin(-28.f, 0.f, 268.f, 52.f);
 	ViewportSlot.ZOrder = 55;
 
 	UGameViewportSubsystem* Viewport = UGameViewportSubsystem::Get();
@@ -78,6 +78,21 @@ void UMobaGoldHUD::Rebuild()
 
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Row"));
 	Frame->AddChild(Row);
+
+	BuyKeyFrame = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("KeyFrame"));
+	BuyKeyFrame->SetBrushColor(FLinearColor(0.12f, 0.1f, 0.08f, 1.f));
+	BuyKeyFrame->SetPadding(FMargin(8.f, 2.f));
+	BuyKeyText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("BuyKey"));
+	BuyKeyText->SetJustification(ETextJustify::Center);
+	BuyKeyText->SetColorAndOpacity(FSlateColor(FLinearColor(0.35f, 0.32f, 0.28f, 1.f)));
+	BuyKeyText->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 16));
+	BuyKeyText->SetText(FText::FromString(TEXT("B")));
+	BuyKeyFrame->AddChild(BuyKeyText);
+	if (UHorizontalBoxSlot* KeySlot = Row->AddChildToHorizontalBox(BuyKeyFrame))
+	{
+		KeySlot->SetVerticalAlignment(VAlign_Center);
+		KeySlot->SetPadding(FMargin(0.f, 0.f, 10.f, 0.f));
+	}
 
 	UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Label"));
 	Label->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.82f, 0.28f, 1.f)));
@@ -130,4 +145,18 @@ void UMobaGoldHUD::UpdateGold()
 	GoldText->SetText(FText::FromString(FString::Printf(
 		TEXT("%d"),
 		FMath::RoundToInt(OwnerCharacter->GetGold()))));
+
+	if (BuyKeyText)
+	{
+		const bool bLit = OwnerCharacter->CanUseShop();
+		BuyKeyText->SetColorAndOpacity(FSlateColor(bLit
+			? FLinearColor(0.08f, 0.06f, 0.02f, 1.f)
+			: FLinearColor(0.32f, 0.28f, 0.24f, 1.f)));
+		if (BuyKeyFrame)
+		{
+			BuyKeyFrame->SetBrushColor(bLit
+				? FLinearColor(0.98f, 0.82f, 0.22f, 1.f)
+				: FLinearColor(0.12f, 0.1f, 0.08f, 1.f));
+		}
+	}
 }

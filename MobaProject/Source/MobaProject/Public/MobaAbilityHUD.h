@@ -6,6 +6,7 @@
 
 class AMobaBaseCharacter;
 class UBorder;
+class UHorizontalBox;
 class UImage;
 class UProgressBar;
 class UTextBlock;
@@ -28,10 +29,12 @@ protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	void RebuildSlots();
+	void FillAbilityIcons();
 	void UpdateSlots();
 	void UpdateHealth();
 	void UpdateEnergy();
 	void UpdateStatus();
+	void UpdatePing();
 
 	UPROPERTY()
 	TObjectPtr<AMobaBaseCharacter> OwnerCharacter;
@@ -61,6 +64,15 @@ protected:
 	TObjectPtr<UTextBlock> NoticeText;
 
 	float NoticeUntilTime = 0.f;
+
+	UPROPERTY()
+	TObjectPtr<UBorder> PingFrame;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> PingText;
+
+	UPROPERTY()
+	TObjectPtr<UHorizontalBox> SlotRow;
 
 	UPROPERTY()
 	TArray<TObjectPtr<UImage>> Icons;

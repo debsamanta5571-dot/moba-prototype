@@ -53,6 +53,10 @@ public:
 	FGameplayAttributeData GoldOnKill;
 	ATTRIBUTE_ACCESSORS(UMobaAttributeSet, GoldOnKill)
 
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_GoldRegen, Category = "Moba")
+	FGameplayAttributeData GoldRegen;
+	ATTRIBUTE_ACCESSORS(UMobaAttributeSet, GoldRegen)
+
 	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_DamageModifier, Category = "Moba")
 	FGameplayAttributeData DamageModifier;
 	ATTRIBUTE_ACCESSORS(UMobaAttributeSet, DamageModifier)
@@ -94,6 +98,9 @@ public:
 
 	UFUNCTION()
 	void OnRep_GoldOnKill(const FGameplayAttributeData& OldGoldOnKill);
+
+	UFUNCTION()
+	void OnRep_GoldRegen(const FGameplayAttributeData& OldGoldRegen);
 
 	UFUNCTION()
 	void OnRep_DamageModifier(const FGameplayAttributeData& OldDamageModifier);

@@ -40,6 +40,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee")
 	float Radius = 60.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee", meta = (ClampMin = "1", ToolTip = "How many units this swing can hit, closest first."))
+	int32 MaxTargets = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee",
+		meta = (ToolTip = "Draw a fire ring on the ground at slash reach. Use for flamestrike."))
+	bool bShowRangeRing = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee", meta = (EditCondition = "bShowRangeRing"))
+	float RangeRingLifetime = 0.7f;
+
 protected:
 	UFUNCTION()
 	void OnMeleeHit(FGameplayEventData Payload);
@@ -48,6 +58,7 @@ protected:
 	void OnMontageDone();
 
 	void TryHit();
+	void ShowRangeRing();
 
 	bool bHitThisSwing = false;
 	bool bEndedThisSwing = false;

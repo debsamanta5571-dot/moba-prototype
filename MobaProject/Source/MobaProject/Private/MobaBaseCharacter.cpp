@@ -1,5 +1,6 @@
 #include "MobaBaseCharacter.h"
 #include "Abilities/GameplayAbility.h"
+#include "GameFramework/DamageType.h"
 #include "Abilities/GameplayAbilityTypes.h"
 #include "AMobaPlayerState.h"
 #include "AbilitySystemComponent.h"
@@ -25,11 +26,12 @@
 #include "Blueprint/UserWidget.h"
 
 #include "Engine/Texture2D.h"
-#include "AudioDevice.h"
 #include "MobaAbilityHUD.h"
 #include "MobaDamageNumber.h"
+#include "MobaGameInstance.h"
 #include "MobaGoldHUD.h"
 #include "MobaRespawnHUD.h"
+#include "MobaCrosshairHUD.h"
 #include "GameFramework/GameStateBase.h"
 #include "DrawDebugHelpers.h"
 #include "GA_MobaGroundTarget.h"
@@ -39,6 +41,9 @@
 #include "MobaNetLibrary.h"
 #include "MobaProjectile.h"
 #include "MobaShopHUD.h"
+#include "MobaInventoryHUD.h"
+#include "MobaShop.h"
+#include "EngineUtils.h"
 #include "MobaTower.h"
 #include "Net/UnrealNetwork.h"
 #include "InputCoreTypes.h"
@@ -48,19 +53,50 @@ AMobaBaseCharacter::AMobaBaseCharacter()
 	PrimaryActorTick.bCanEverTick = true;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	GetCapsuleComponent()->SetGenerateOverlapEvents(true);
+	if (USkeletalMeshComponent* Skel = GetMesh())
+	{
+		Skel->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	}
+
+	AutoPossessPlayer = EAutoReceiveInput::Disabled;
+	AutoPossessAI = EAutoPossessAI::Disabled;
 
 	bUseControllerRotationYaw = true;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
+	GetCharacterMovement()->bEnablePhysicsInteraction = false;
+	GetCharacterMovement()->MaxDepenetrationWithPawn = 200.f;
+	GetCharacterMovement()->MaxDepenetrationWithPawnAsProxy = 100.f;
 	GetCharacterMovement()->MaxWalkSpeed = 500.f;
 	DefaultMaxWalkSpeed = 500.f;
 
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(RootComponent);
+	SpringArm->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
 	SpringArm->bUsePawnControlRotation = true;
+	SpringArm->bDoCollisionTest = false;
+	SpringArm->ProbeChannel = ECC_Camera;
+	SpringArm->ProbeSize = 8.f;
+	SpringArm->bEnableCameraLag = false;
+	SpringArm->bEnableCameraRotationLag = false;
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm);
 	Camera->bUsePawnControlRotation = false;
+
+	Crosshair = CreateDefaultSubobject<UWidgetComponent>(TEXT("Crosshair"));
+	Crosshair->SetupAttachment(Camera);
+	Crosshair->SetRelativeLocation(FVector(120.f, 0.f, 0.f));
+	Crosshair->SetWidgetSpace(EWidgetSpace::Screen);
+	Crosshair->SetPivot(FVector2D(0.5f, 0.5f));
+	Crosshair->SetDrawSize(FVector2D(32.f, 32.f));
+	Crosshair->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Crosshair->SetTickWhenOffscreen(true);
+	Crosshair->SetTwoSided(true);
+	Crosshair->SetWidgetClass(UMobaCrosshairHUD::StaticClass());
+	Crosshair->SetHiddenInGame(true);
 
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
@@ -92,15 +128,40 @@ AMobaBaseCharacter::AMobaBaseCharacter()
 	AddOffer(TEXT("Health"), EMobaShopStat::Health, 25.f, 80.f);
 	AddOffer(TEXT("Resist"), EMobaShopStat::DamageResistance, 0.05f, 120.f);
 	AddOffer(TEXT("Move Speed"), EMobaShopStat::MoveSpeed, 25.f, 80.f);
+	AddOffer(TEXT("Gold Regen"), EMobaShopStat::GoldRegen, 1.f, 100.f);
+}
+
+void AMobaBaseCharacter::PostLoad()
+{
+	Super::PostLoad();
+	EnsureAbilitySlots();
 }
 
 void AMobaBaseCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-	bSfxMuted = false;
-	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	EnsureAbilitySlots();
+
+	if (UCapsuleComponent* Cap = GetCapsuleComponent())
 	{
-		PC->ClearAudioListenerOverride();
+		Cap->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		Cap->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+		Cap->SetGenerateOverlapEvents(true);
+	}
+	TArray<UPrimitiveComponent*> Prims;
+	GetComponents<UPrimitiveComponent>(Prims);
+	for (UPrimitiveComponent* Prim : Prims)
+	{
+		if (Prim)
+		{
+			Prim->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+		}
+	}
+	if (SpringArm)
+	{
+		SpringArm->bDoCollisionTest = false;
+		SpringArm->bEnableCameraLag = false;
+		SpringArm->bEnableCameraRotationLag = false;
 	}
 
 	InitAttributeSet();
@@ -112,10 +173,20 @@ void AMobaBaseCharacter::BeginPlay()
 		}
 	}
 
+	if (Crosshair)
+	{
+		Crosshair->InitWidget();
+	}
 	CreateAbilityHUD();
+	RefreshCrosshairVisibility();
+	if (IsLocallyControlled())
+	{
+		RefreshMenuInput();
+	}
 	if (HasAuthority())
 	{
 		GetWorldTimerManager().SetTimer(RegenTimer, this, &AMobaBaseCharacter::TickRegen, 0.25f, true);
+		ScheduleShopRangeRefresh();
 	}
 	if (UWorld* World = GetWorld())
 	{
@@ -127,22 +198,26 @@ void AMobaBaseCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	SanitizeTimedState();
-	if (IsLocallyControlled() && bSfxMuted)
-	{
-		ApplySfxListenerMute();
-	}
 
 	UWorld* World = GetWorld();
-	if (!World || !IsLocallyControlled())
+	if (!World)
 	{
 		return;
 	}
 
-	if (bGroundAiming)
+	if (IsLocallyControlled())
 	{
-		const FVector Loc = UGA_MobaGroundTarget::TraceGroundAim(this, GroundAimMaxRange);
-		DrawDebugSphere(World, Loc, GroundAimRadius, 24, FColor::Cyan, false, -1.f, 0, 4.f);
-		return;
+		if (RespawnHUD)
+		{
+			RespawnHUD->Refresh();
+		}
+
+		// Never draw aim + blast together (F19/F21). Leftover aim sits behind the impact.
+		if (bGroundAiming && GroundBlastStartTime <= 0.f)
+		{
+			const FVector Loc = UGA_MobaGroundTarget::TraceGroundAim(this, GroundAimMaxRange);
+			DrawDebugSphere(World, Loc, GroundAimRadius, 24, FColor::Cyan, false, -1.f, 0, 4.f);
+		}
 	}
 
 	if (GroundBlastStartTime > 0.f)
@@ -156,6 +231,38 @@ void AMobaBaseCharacter::Tick(float DeltaSeconds)
 		{
 			const float Radius = GroundBlastRadius * FMath::Clamp(Elapsed / FMath::Max(GroundBlastDuration, 0.05f), 0.f, 1.f);
 			DrawDebugSphere(World, GroundBlastLoc, Radius, 24, FColor::Orange, false, -1.f, 0, 4.f);
+		}
+	}
+
+	if (FireRingStartTime > 0.f)
+	{
+		const float Elapsed = World->GetTimeSeconds() - FireRingStartTime;
+		if (Elapsed >= FireRingDuration)
+		{
+			FireRingStartTime = -100.f;
+		}
+		else
+		{
+			const float Alpha = 1.f - FMath::Clamp(Elapsed / FMath::Max(FireRingDuration, 0.05f), 0.f, 1.f);
+			const float Grow = FMath::Clamp(Elapsed / 0.12f, 0.f, 1.f);
+			const float R = FireRingRadius * FMath::Lerp(0.62f, 1.f, Grow);
+			const float HalfH = GetCapsuleComponent() ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 96.f;
+			const FVector Center = GetActorLocation() - FVector(0.f, 0.f, HalfH - 6.f);
+			const FVector X(1.f, 0.f, 0.f);
+			const FVector Y(0.f, 1.f, 0.f);
+			const uint8 Fade = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(255.f * Alpha), 40, 255));
+			DrawDebugCircle(World, Center, R, 48, FColor(255, 90, 16, Fade), false, -1.f, 0, 6.f, X, Y, false);
+			DrawDebugCircle(World, Center + FVector(0.f, 0.f, 10.f), R * 0.92f, 40, FColor(255, 170, 32, Fade), false, -1.f, 0, 3.f, X, Y, false);
+			DrawDebugCircle(World, Center + FVector(0.f, 0.f, 22.f), R * 0.84f, 32, FColor(255, 48, 8, Fade), false, -1.f, 0, 2.f, X, Y, false);
+			const int32 Flames = 12;
+			for (int32 i = 0; i < Flames; ++i)
+			{
+				const float Rad = (2.f * PI * static_cast<float>(i)) / static_cast<float>(Flames);
+				const FVector Dir(FMath::Cos(Rad), FMath::Sin(Rad), 0.f);
+				const FVector Inner = Center + Dir * (R * 0.88f);
+				const FVector Outer = Center + Dir * (R * 1.06f) + FVector(0.f, 0.f, 28.f + 10.f * FMath::Sin(Elapsed * 18.f + Rad));
+				DrawDebugLine(World, Inner, Outer, FColor(255, 110, 20, Fade), false, -1.f, 0, 2.5f);
+			}
 		}
 	}
 }
@@ -175,10 +282,25 @@ void AMobaBaseCharacter::StopGroundAimDebug()
 void AMobaBaseCharacter::PlayGroundBlastDebug(FVector Location, float Radius, float Lifetime)
 {
 	StopGroundAimDebug();
+	if (GroundBlastStartTime > 0.f
+		&& GetWorld()
+		&& (GetWorld()->GetTimeSeconds() - GroundBlastStartTime) < 0.2f
+		&& FVector::DistSquared(GroundBlastLoc, Location) > 1.f)
+	{
+		// Same-frame second spawn (predicted + authority) is the extra mesh behind the first.
+		return;
+	}
 	GroundBlastLoc = Location;
 	GroundBlastRadius = Radius;
 	GroundBlastDuration = FMath::Max(Lifetime, 0.05f);
 	GroundBlastStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+}
+
+void AMobaBaseCharacter::PlayFireRingDebug(float Radius, float Lifetime)
+{
+	FireRingRadius = FMath::Max(Radius, 20.f);
+	FireRingDuration = FMath::Max(Lifetime, 0.05f);
+	FireRingStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
 }
 
 void AMobaBaseCharacter::InitAttributeSet()
@@ -196,6 +318,7 @@ void AMobaBaseCharacter::InitAttributeSet()
 	AttributeSet->InitEnergyRegen(DefaultEnergyRegen);
 	AttributeSet->InitGold(StartingGold);
 	AttributeSet->InitGoldOnKill(DefaultGoldOnKill);
+	AttributeSet->InitGoldRegen(DefaultGoldRegen);
 	AttributeSet->InitDamageModifier(DefaultDamageModifier);
 	AttributeSet->InitCooldownReduction(DefaultCooldownReduction);
 	AttributeSet->InitDamageResistance(DefaultDamageResistance);
@@ -207,6 +330,7 @@ void AMobaBaseCharacter::InitAttributeSet()
 void AMobaBaseCharacter::SetTeamId(int32 InTeam)
 {
 	TeamID = InTeam;
+	ScheduleShopRangeRefresh();
 }
 
 float AMobaBaseCharacter::GetServerTimeSeconds() const
@@ -224,11 +348,15 @@ float AMobaBaseCharacter::GetServerTimeSeconds() const
 
 float AMobaBaseCharacter::GetRespawnRemaining() const
 {
-	if (!bDead || RespawnAtTime <= 0.f)
+	if (!bDead)
 	{
 		return 0.f;
 	}
-	return FMath::Max(0.f, RespawnAtTime - GetServerTimeSeconds());
+	if (RespawnAtTime > 0.f)
+	{
+		return FMath::Max(0.f, RespawnAtTime - GetServerTimeSeconds());
+	}
+	return RespawnDelay;
 }
 
 void AMobaBaseCharacter::SyncTeamFromPlayerState()
@@ -242,24 +370,41 @@ void AMobaBaseCharacter::SyncTeamFromPlayerState()
 	}
 }
 
+void AMobaBaseCharacter::SnapFacingToSpawn(const FRotator& SpawnRot)
+{
+	const FRotator Yaw(0.f, SpawnRot.Yaw, 0.f);
+	SetActorRotation(Yaw);
+	AController* C = GetController();
+	if (!C)
+	{
+		return;
+	}
+	C->SetControlRotation(Yaw);
+	if (APlayerController* PC = Cast<APlayerController>(C))
+	{
+		PC->ClientSetRotation(Yaw, true);
+	}
+}
+
 void AMobaBaseCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
-	if (!bSfxMuted)
-	{
-		if (APlayerController* PC = Cast<APlayerController>(NewController))
-		{
-			PC->ClearAudioListenerOverride();
-		}
-	}
+	SnapFacingToSpawn(GetActorRotation());
 	SyncTeamFromPlayerState();
+	ScheduleShopRangeRefresh();
 
 	AbilitySystemComponent->InitAbilityActorInfo(this, this);
-	GrantAbility(Ability1);
-	GrantAbility(Ability2);
-	GrantAbility(Ability3);
-	GrantAbility(Ability4);
+	EnsureAbilitySlots();
+	for (int32 i = 0; i < AbilitySlots.Num(); ++i)
+	{
+		GrantAbility(AbilitySlots[i].Ability, i);
+	}
 	CreateAbilityHUD();
+	RefreshCrosshairVisibility();
+	if (IsLocallyControlled())
+	{
+		RefreshMenuInput();
+	}
 }
 
 void AMobaBaseCharacter::OnRep_PlayerState()
@@ -329,7 +474,45 @@ void AMobaBaseCharacter::NotifyDealtDamage(FVector Location, float Amount)
 	ClientShowDamageNumber(Location, Amount);
 }
 
+void AMobaBaseCharacter::NotifyTakenDamage(FVector Location, float Amount)
+{
+	if (Amount <= 0.f)
+	{
+		return;
+	}
+	if (IsLocallyControlled())
+	{
+		ClientShowDamageNumber_Implementation(Location, Amount);
+		return;
+	}
+	ClientShowDamageNumber(Location, Amount);
+}
+
+void AMobaBaseCharacter::NotifyGainedGold(FVector Location, float Amount)
+{
+	if (Amount <= 0.f)
+	{
+		return;
+	}
+	if (IsLocallyControlled())
+	{
+		ClientShowGoldNumber_Implementation(Location, Amount);
+		return;
+	}
+	ClientShowGoldNumber(Location, Amount);
+}
+
 void AMobaBaseCharacter::ClientShowDamageNumber_Implementation(FVector Location, float Amount)
+{
+	SpawnFloatingNumber(Location, Amount, false);
+}
+
+void AMobaBaseCharacter::ClientShowGoldNumber_Implementation(FVector Location, float Amount)
+{
+	SpawnFloatingNumber(Location, Amount, true);
+}
+
+void AMobaBaseCharacter::SpawnFloatingNumber(FVector Location, float Amount, bool bGold)
 {
 	UWorld* World = GetWorld();
 	if (!World || Amount <= 0.f)
@@ -338,6 +521,10 @@ void AMobaBaseCharacter::ClientShowDamageNumber_Implementation(FVector Location,
 	}
 
 	Location += FVector(FMath::FRandRange(-18.f, 18.f), FMath::FRandRange(-18.f, 18.f), FMath::FRandRange(-8.f, 16.f));
+	if (bGold)
+	{
+		Location.Z += 36.f;
+	}
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -350,7 +537,7 @@ void AMobaBaseCharacter::ClientShowDamageNumber_Implementation(FVector Location,
 		FRotator::ZeroRotator,
 		Params))
 	{
-		Number->Init(Amount);
+		Number->Init(Amount, bGold);
 	}
 }
 
@@ -365,19 +552,93 @@ void AMobaBaseCharacter::SpendGold(float Amount)
 
 void AMobaBaseCharacter::NotifyEnteredShop()
 {
-	++ShopRangeCount;
-	bInShopRange = true;
+	RefreshShopRange();
 }
 
 void AMobaBaseCharacter::NotifyLeftShop()
 {
-	ShopRangeCount = FMath::Max(0, ShopRangeCount - 1);
-	bInShopRange = ShopRangeCount > 0;
+	RefreshShopRange();
+}
+
+void AMobaBaseCharacter::RefreshShopRange()
+{
+	if (!HasAuthority() || bIgnoreShopRangeChanges)
+	{
+		return;
+	}
+
+	SyncTeamFromPlayerState();
+
+	int32 Count = 0;
+	const int32 HeroTeam = GetTeamId();
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<AMobaShop> It(World); It; ++It)
+		{
+			AMobaShop* Shop = *It;
+			if (!Shop)
+			{
+				continue;
+			}
+			const int32 ShopTeam = Shop->GetTeamId();
+			if (ShopTeam != 0 && HeroTeam != 0 && ShopTeam != HeroTeam)
+			{
+				continue;
+			}
+			if (Shop->ContainsPawn(this))
+			{
+				++Count;
+			}
+		}
+	}
+
+	ShopRangeCount = Count;
+	const bool bNowIn = Count > 0;
+	if (bInShopRange == bNowIn)
+	{
+		return;
+	}
+	bInShopRange = bNowIn;
+	OnRep_InShopRange();
+}
+
+void AMobaBaseCharacter::ScheduleShopRangeRefresh()
+{
+	RefreshShopRange();
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimerForNextTick(
+			FTimerDelegate::CreateUObject(this, &AMobaBaseCharacter::RefreshShopRange));
+	}
+}
+
+void AMobaBaseCharacter::OnRep_InShopRange()
+{
+	if (!CanUseShop() && bShopOpen)
+	{
+		SetShopOpen(false);
+	}
 }
 
 bool AMobaBaseCharacter::CanUseShop() const
 {
 	return bDead || bInShopRange;
+}
+
+bool AMobaBaseCharacter::CanBuyAnything() const
+{
+	if (!CanUseShop())
+	{
+		return false;
+	}
+	for (int32 i = 0; i < ShopOffers.Num(); ++i)
+	{
+		if (CanBuyShopOffer(i))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool AMobaBaseCharacter::CanApplyShopOffer(const FMobaShopOffer& Offer) const
@@ -426,6 +687,23 @@ void AMobaBaseCharacter::ServerBuyShopOffer_Implementation(int32 Index)
 	const FMobaShopOffer Offer = ShopOffers[Index];
 	SpendGold(Offer.Cost);
 	ApplyShopOffer(Offer);
+	PurchasedOffers.Add(Offer);
+}
+
+void AMobaBaseCharacter::ServerRequestPlayAgain_Implementation()
+{
+	if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
+	{
+		GI->RestartMatch();
+	}
+}
+
+void AMobaBaseCharacter::ServerRequestReturnToMenu_Implementation()
+{
+	if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
+	{
+		GI->ReturnToMenu();
+	}
 }
 
 void AMobaBaseCharacter::ApplyShopOffer(const FMobaShopOffer& Offer)
@@ -460,6 +738,9 @@ void AMobaBaseCharacter::ApplyShopOffer(const FMobaShopOffer& Offer)
 		AttributeSet->SetMoveSpeed(AttributeSet->GetMoveSpeed() + Offer.Magnitude);
 		RefreshMoveSpeed();
 		break;
+	case EMobaShopStat::GoldRegen:
+		AttributeSet->SetGoldRegen(AttributeSet->GetGoldRegen() + Offer.Magnitude);
+		break;
 	default:
 		break;
 	}
@@ -481,14 +762,36 @@ void AMobaBaseCharacter::SpendEnergy(float Cost)
 
 void AMobaBaseCharacter::TickRegen()
 {
-	if (!HasAuthority() || bDead || !AttributeSet)
+	if (!HasAuthority() || !AttributeSet)
 	{
 		return;
 	}
 
+	if (!bDead)
+	{
+		RefreshShopRange();
+	}
+
 	const float Dt = 0.25f;
-	AttributeSet->SetHealth(FMath::Min(AttributeSet->GetMaxHealth(), AttributeSet->GetHealth() + AttributeSet->GetHealthRegen() * Dt));
-	AttributeSet->SetEnergy(FMath::Min(AttributeSet->GetMaxEnergy(), AttributeSet->GetEnergy() + AttributeSet->GetEnergyRegen() * Dt));
+	if (AttributeSet->GetGoldRegen() > 0.f)
+	{
+		AttributeSet->SetGold(AttributeSet->GetGold() + AttributeSet->GetGoldRegen() * Dt);
+	}
+
+	if (bDead)
+	{
+		return;
+	}
+
+	float HealthRate = AttributeSet->GetHealthRegen();
+	float EnergyRate = AttributeSet->GetEnergyRegen();
+	if (bInShopRange)
+	{
+		HealthRate += ShopHealthRegenBonus;
+		EnergyRate += ShopEnergyRegenBonus;
+	}
+	AttributeSet->SetHealth(FMath::Min(AttributeSet->GetMaxHealth(), AttributeSet->GetHealth() + HealthRate * Dt));
+	AttributeSet->SetEnergy(FMath::Min(AttributeSet->GetMaxEnergy(), AttributeSet->GetEnergy() + EnergyRate * Dt));
 }
 
 bool AMobaBaseCharacter::ApplyMobaDamage(AActor* Target, float Amount, AActor* Instigator)
@@ -510,41 +813,55 @@ bool AMobaBaseCharacter::ApplyMobaDamage(AActor* Target, float Amount, AActor* I
 	}
 
 	float Incoming = Amount;
-	if (const UMobaAttributeSet* AttackerSet = UMobaAttributeSet::GetFromActor(Instigator))
+	const AMobaTower* AttackingTower = Cast<AMobaTower>(Instigator);
+	if (AttackingTower && Cast<AMobaMinion>(Target))
 	{
-		Incoming *= FMath::Max(0.f, AttackerSet->GetDamageModifier());
+		Incoming = Set->GetMaxHealth() * FMath::Clamp(AttackingTower->GetMinionMaxHealthDamage(), 0.f, 1.f);
 	}
-	Incoming *= 1.f - FMath::Clamp(Set->GetDamageResistance(), 0.f, 0.9f);
+	else
+	{
+		if (const UMobaAttributeSet* AttackerSet = UMobaAttributeSet::GetFromActor(Instigator))
+		{
+			Incoming *= FMath::Max(0.f, AttackerSet->GetDamageModifier());
+		}
+		Incoming *= 1.f - FMath::Clamp(Set->GetDamageResistance(), 0.f, 0.9f);
+	}
 	Incoming = FMath::Max(0.f, Incoming);
 
 	Set->SetHealth(FMath::Max(0.f, Set->GetHealth() - Incoming));
 	if (Incoming > 0.f)
 	{
+		const FVector NumberLoc = Target->GetActorLocation() + FVector(0.f, 0.f, 90.f);
+		if (AMobaBaseCharacter* Dealer = Cast<AMobaBaseCharacter>(Instigator))
+		{
+			if (AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(Target))
+			{
+				Hero->NotePlayerDamageFrom(Dealer);
+			}
+			else if (AMobaMinion* Minion = Cast<AMobaMinion>(Target))
+			{
+				Minion->NotePlayerDamageFrom(Dealer);
+			}
+			Dealer->NotifyDealtDamage(NumberLoc, Incoming);
+		}
+		if (AMobaBaseCharacter* HurtHero = Cast<AMobaBaseCharacter>(Target))
+		{
+			HurtHero->NotifyTakenDamage(NumberLoc, Incoming);
+		}
 		if (AMobaMinion* Minion = Cast<AMobaMinion>(Target))
 		{
 			Minion->NotifyDamagedBy(Instigator);
 		}
-		if (AMobaBaseCharacter* Dealer = Cast<AMobaBaseCharacter>(Instigator))
-		{
-			Dealer->NotifyDealtDamage(Target->GetActorLocation() + FVector(0.f, 0.f, 90.f), Incoming);
-		}
 	}
 	if (Set->GetHealth() <= 0.f)
 	{
-		if (AMobaBaseCharacter* Killer = Cast<AMobaBaseCharacter>(Instigator))
-		{
-			if (Cast<AMobaBaseCharacter>(Target) || Cast<AMobaMinion>(Target))
-			{
-				Killer->AddGold(Set->GetGoldOnKill());
-			}
-		}
 		if (AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(Target))
 		{
-			Hero->HandleDeath();
+			Hero->HandleDeath(Instigator);
 		}
 		else if (AMobaMinion* DeadMinion = Cast<AMobaMinion>(Target))
 		{
-			DeadMinion->HandleDeath();
+			DeadMinion->HandleDeath(Instigator);
 		}
 		else if (AMobaTower* Tower = Cast<AMobaTower>(Target))
 		{
@@ -552,6 +869,92 @@ bool AMobaBaseCharacter::ApplyMobaDamage(AActor* Target, float Amount, AActor* I
 		}
 	}
 	return true;
+}
+
+void AMobaBaseCharacter::AwardKillGold(AActor* Victim, AActor* Killer)
+{
+	if (!IsValid(Victim))
+	{
+		return;
+	}
+	if (!Cast<AMobaBaseCharacter>(Victim) && !Cast<AMobaMinion>(Victim))
+	{
+		return;
+	}
+
+	const UMobaAttributeSet* VictimSet = UMobaAttributeSet::GetFromActor(Victim);
+	if (!VictimSet)
+	{
+		return;
+	}
+	const float Gold = VictimSet->GetGoldOnKill();
+	if (Gold <= 0.f)
+	{
+		return;
+	}
+
+	AMobaBaseCharacter* Recipient = Cast<AMobaBaseCharacter>(Killer);
+	if (!Recipient)
+	{
+		if (AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(Victim))
+		{
+			Recipient = Hero->GetPlayerKillCredit();
+		}
+		else if (AMobaMinion* Minion = Cast<AMobaMinion>(Victim))
+		{
+			Recipient = Minion->GetPlayerKillCredit();
+		}
+	}
+	if (Recipient)
+	{
+		Recipient->AddGold(Gold);
+		Recipient->NotifyGainedGold(Victim->GetActorLocation() + FVector(0.f, 0.f, 90.f), Gold);
+	}
+}
+
+void AMobaBaseCharacter::NotePlayerDamageFrom(AMobaBaseCharacter* Player)
+{
+	if (!HasAuthority() || !IsValid(Player) || Player == this)
+	{
+		return;
+	}
+
+	const float Window = FMath::Max(0.f, PlayerKillCreditSeconds);
+	if (Window <= KINDA_SMALL_NUMBER)
+	{
+		ClearPlayerKillCredit();
+		return;
+	}
+
+	LastPlayerDamager = Player;
+	PlayerKillCreditUntilTime = GetServerTimeSeconds() + Window;
+	GetWorldTimerManager().ClearTimer(PlayerKillCreditTimer);
+	GetWorldTimerManager().SetTimer(
+		PlayerKillCreditTimer,
+		this,
+		&AMobaBaseCharacter::ClearPlayerKillCredit,
+		Window,
+		false);
+}
+
+AMobaBaseCharacter* AMobaBaseCharacter::GetPlayerKillCredit() const
+{
+	if (IsTimerExpired(PlayerKillCreditUntilTime))
+	{
+		return nullptr;
+	}
+	AMobaBaseCharacter* Player = LastPlayerDamager.Get();
+	return IsValid(Player) ? Player : nullptr;
+}
+
+void AMobaBaseCharacter::ClearPlayerKillCredit()
+{
+	LastPlayerDamager.Reset();
+	PlayerKillCreditUntilTime = 0.f;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PlayerKillCreditTimer);
+	}
 }
 
 void AMobaBaseCharacter::ApplyMobaEffects(
@@ -778,6 +1181,10 @@ void AMobaBaseCharacter::SanitizeTimedState()
 	{
 		EndPlantedFromTimer();
 	}
+	if (LastPlayerDamager.IsValid() && IsTimerExpired(PlayerKillCreditUntilTime))
+	{
+		ClearPlayerKillCredit();
+	}
 
 	TArray<FGameplayTag> Expired;
 	for (const TPair<FGameplayTag, float>& Pair : CooldownEndTimes)
@@ -845,16 +1252,128 @@ void AMobaBaseCharacter::StartCooldown(FGameplayTag Tag, float Duration)
 		false);
 }
 
+void AMobaBaseCharacter::EnsureAbilitySlots()
+{
+	if (AbilitySlots.Num() == 0)
+	{
+		const TSubclassOf<UGameplayAbility> LegacyAbilities[4] = { Ability1, Ability2, Ability3, Ability4 };
+		UInputAction* LegacyInputs[4] = { Ability1Input, Ability2Input, Ability3Input, Ability4Input };
+		static const TCHAR* LegacyLabels[4] = { TEXT("LMB"), TEXT("Q"), TEXT("SHIFT"), TEXT("E") };
+		for (int32 i = 0; i < 4; ++i)
+		{
+			if (!LegacyAbilities[i] && !LegacyInputs[i])
+			{
+				continue;
+			}
+			FMobaAbilityBind Slot;
+			Slot.Ability = LegacyAbilities[i];
+			Slot.Input = LegacyInputs[i];
+			Slot.KeyLabel = LegacyLabels[i];
+			AbilitySlots.Add(Slot);
+		}
+	}
+
+	if (AbilitySlots.Num() == 0)
+	{
+		for (UClass* Super = GetClass()->GetSuperClass(); Super; Super = Super->GetSuperClass())
+		{
+			if (!Super->IsChildOf(StaticClass()))
+			{
+				break;
+			}
+			const AMobaBaseCharacter* ParentCDO = Super->GetDefaultObject<AMobaBaseCharacter>();
+			if (ParentCDO && ParentCDO != this && ParentCDO->AbilitySlots.Num() > 0)
+			{
+				AbilitySlots = ParentCDO->AbilitySlots;
+				break;
+			}
+		}
+	}
+}
+
+int32 AMobaBaseCharacter::GetAbilitySlotCount() const
+{
+	return AbilitySlots.Num();
+}
+
+FString AMobaBaseCharacter::GetAbilityKeyLabel(int32 Index) const
+{
+	if (!AbilitySlots.IsValidIndex(Index))
+	{
+		return FString();
+	}
+	if (!AbilitySlots[Index].KeyLabel.IsEmpty())
+	{
+		return AbilitySlots[Index].KeyLabel;
+	}
+	return FString::FromInt(Index + 1);
+}
+
 TSubclassOf<UGameplayAbility> AMobaBaseCharacter::GetAbilitySlot(int32 Index) const
 {
-	switch (Index)
+	return AbilitySlots.IsValidIndex(Index) ? AbilitySlots[Index].Ability : nullptr;
+}
+
+FGameplayTag AMobaBaseCharacter::AbilitySlotTag(int32 SlotIndex)
+{
+	if (SlotIndex < 0)
 	{
-	case 0: return Ability1;
-	case 1: return Ability2;
-	case 2: return Ability3;
-	case 3: return Ability4;
-	default: return nullptr;
+		return FGameplayTag();
 	}
+	return FGameplayTag::RequestGameplayTag(
+		FName(*FString::Printf(TEXT("Ability.%d"), SlotIndex + 1)),
+		false);
+}
+
+FGameplayTag AMobaBaseCharacter::GetAbilityTagForSlot(int32 SlotIndex) const
+{
+	return AbilitySlotTag(SlotIndex);
+}
+
+void AMobaBaseCharacter::SetPendingAbilityLocation(const FVector& Location)
+{
+	PendingAbilityLocation = Location;
+	bHasPendingAbilityLocation = true;
+}
+
+FVector AMobaBaseCharacter::ConsumePendingAbilityLocation()
+{
+	bHasPendingAbilityLocation = false;
+	return PendingAbilityLocation;
+}
+
+FGameplayTag AMobaBaseCharacter::GetCooldownTagForAbilityClass(TSubclassOf<UGameplayAbility> AbilityClass) const
+{
+	UClass* Query = AbilityClass.Get();
+	if (!Query)
+	{
+		return FGameplayTag();
+	}
+	Query = Query->GetAuthoritativeClass();
+
+	int32 ExactIndex = INDEX_NONE;
+	int32 ChildIndex = INDEX_NONE;
+	for (int32 i = 0; i < AbilitySlots.Num(); ++i)
+	{
+		UClass* SlotClass = AbilitySlots[i].Ability.Get();
+		if (!SlotClass)
+		{
+			continue;
+		}
+		SlotClass = SlotClass->GetAuthoritativeClass();
+		if (Query == SlotClass)
+		{
+			ExactIndex = i;
+			break;
+		}
+		if (ChildIndex == INDEX_NONE && Query->IsChildOf(SlotClass))
+		{
+			ChildIndex = i;
+		}
+	}
+
+	const int32 Index = ExactIndex != INDEX_NONE ? ExactIndex : ChildIndex;
+	return Index != INDEX_NONE ? GetAbilityTagForSlot(Index) : FGameplayTag();
 }
 
 void AMobaBaseCharacter::GetAbilityHudInfo(int32 Index, UTexture2D*& OutIcon, float& OutRemaining, float& OutDuration) const
@@ -879,9 +1398,9 @@ void AMobaBaseCharacter::GetAbilityHudInfo(int32 Index, UTexture2D*& OutIcon, fl
 			TEXT("/Game/Moba/Art/T_Icon_Dash.T_Icon_Dash"),
 			TEXT("/Game/Moba/Art/T_Icon_Ground.T_Icon_Ground")
 		};
-		if (Index >= 0 && Index < 4)
+		if (Index >= 0)
 		{
-			OutIcon = LoadObject<UTexture2D>(nullptr, IconPaths[Index]);
+			OutIcon = LoadObject<UTexture2D>(nullptr, IconPaths[Index % 4]);
 		}
 	}
 	OutDuration = CDO->Cooldown;
@@ -890,18 +1409,19 @@ void AMobaBaseCharacter::GetAbilityHudInfo(int32 Index, UTexture2D*& OutIcon, fl
 		const float Cdr = FMath::Clamp(AttributeSet->GetCooldownReduction(), 0.f, 0.8f);
 		OutDuration = FMath::Max(CDO->Cooldown * (1.f - Cdr), 0.05f);
 	}
-	if (const float* Stored = CooldownDurations.Find(CDO->CooldownTag))
+	const FGameplayTag SlotCooldown = GetAbilityTagForSlot(Index);
+	if (const float* Stored = CooldownDurations.Find(SlotCooldown))
 	{
 		OutDuration = *Stored;
 	}
 
-	if (CDO->CooldownTag.IsValid())
+	if (SlotCooldown.IsValid())
 	{
-		if (const float* EndTime = CooldownEndTimes.Find(CDO->CooldownTag))
+		if (const float* EndTime = CooldownEndTimes.Find(SlotCooldown))
 		{
 			OutRemaining = FMath::Max(0.f, *EndTime - GetServerTimeSeconds());
 		}
-		else if (const FTimerHandle* Handle = CooldownHandles.Find(CDO->CooldownTag))
+		else if (const FTimerHandle* Handle = CooldownHandles.Find(SlotCooldown))
 		{
 			const float Remaining = GetWorldTimerManager().GetTimerRemaining(*Handle);
 			OutRemaining = Remaining > 0.f ? Remaining : 0.f;
@@ -913,12 +1433,15 @@ void AMobaBaseCharacter::NotifyControllerChanged()
 {
 	Super::NotifyControllerChanged();
 	CreateAbilityHUD();
+	RefreshCrosshairVisibility();
 }
 
 void AMobaBaseCharacter::PawnClientRestart()
 {
 	Super::PawnClientRestart();
+	SnapFacingToSpawn(GetActorRotation());
 	CreateAbilityHUD();
+	RefreshCrosshairVisibility();
 }
 
 void AMobaBaseCharacter::CreateAbilityHUD()
@@ -934,6 +1457,12 @@ void AMobaBaseCharacter::CreateAbilityHUD()
 		return;
 	}
 
+	RefreshCrosshairVisibility();
+	CreateGoldHUD();
+	CreateShopHUD();
+	CreateInventoryHUD();
+	CreateRespawnHUD();
+
 	if (AbilityHUD)
 	{
 		AbilityHUD->PlaceInViewport();
@@ -941,9 +1470,6 @@ void AMobaBaseCharacter::CreateAbilityHUD()
 		{
 			HealthWidget->SetHiddenInGame(true);
 		}
-		CreateGoldHUD();
-		CreateShopHUD();
-		CreateRespawnHUD();
 		return;
 	}
 
@@ -959,9 +1485,6 @@ void AMobaBaseCharacter::CreateAbilityHUD()
 	{
 		HealthWidget->SetHiddenInGame(true);
 	}
-	CreateGoldHUD();
-	CreateShopHUD();
-	CreateRespawnHUD();
 }
 
 void AMobaBaseCharacter::CreateRespawnHUD()
@@ -979,7 +1502,9 @@ void AMobaBaseCharacter::CreateRespawnHUD()
 
 	if (RespawnHUD)
 	{
+		RespawnHUD->SetOwnerCharacter(this);
 		RespawnHUD->PlaceInViewport();
+		RespawnHUD->Refresh();
 		return;
 	}
 
@@ -990,6 +1515,17 @@ void AMobaBaseCharacter::CreateRespawnHUD()
 	}
 	RespawnHUD->SetOwnerCharacter(this);
 	RespawnHUD->PlaceInViewport();
+}
+
+void AMobaBaseCharacter::RefreshCrosshairVisibility()
+{
+	if (!Crosshair)
+	{
+		return;
+	}
+	const bool bShow = IsLocallyControlled() && !bDead;
+	Crosshair->SetHiddenInGame(!bShow);
+	Crosshair->SetVisibility(bShow);
 }
 
 void AMobaBaseCharacter::CreateGoldHUD()
@@ -1049,22 +1585,11 @@ void AMobaBaseCharacter::CreateShopHUD()
 	ShopHUD->SetShopOpen(false);
 }
 
-void AMobaBaseCharacter::ToggleShop()
+void AMobaBaseCharacter::CreateInventoryHUD()
 {
 	if (!IsLocallyControlled())
 	{
 		return;
-	}
-	CreateShopHUD();
-	SetShopOpen(!bShopOpen);
-}
-
-void AMobaBaseCharacter::SetShopOpen(bool bOpen)
-{
-	bShopOpen = bOpen;
-	if (ShopHUD)
-	{
-		ShopHUD->SetShopOpen(bOpen);
 	}
 
 	APlayerController* PC = Cast<APlayerController>(GetController());
@@ -1073,8 +1598,101 @@ void AMobaBaseCharacter::SetShopOpen(bool bOpen)
 		return;
 	}
 
-	PC->bShowMouseCursor = bOpen;
-	if (bOpen)
+	if (InventoryHUD)
+	{
+		InventoryHUD->PlaceInViewport();
+		return;
+	}
+
+	InventoryHUD = CreateWidget<UMobaInventoryHUD>(PC, UMobaInventoryHUD::StaticClass());
+	if (!InventoryHUD)
+	{
+		return;
+	}
+	InventoryHUD->SetOwnerCharacter(this);
+	InventoryHUD->PlaceInViewport();
+	InventoryHUD->SetInventoryOpen(false);
+}
+
+void AMobaBaseCharacter::ToggleShop()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	if (bShopOpen)
+	{
+		SetShopOpen(false);
+		return;
+	}
+	if (!CanUseShop())
+	{
+		return;
+	}
+	CreateShopHUD();
+	SetShopOpen(true);
+}
+
+void AMobaBaseCharacter::ToggleInventory()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	CreateInventoryHUD();
+	SetInventoryOpen(!bInventoryOpen);
+}
+
+void AMobaBaseCharacter::ToggleSettings()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
+	{
+		GI->ToggleSettings();
+	}
+}
+
+void AMobaBaseCharacter::SetShopOpen(bool bOpen)
+{
+	bShopOpen = bOpen && CanUseShop();
+	if (ShopHUD)
+	{
+		ShopHUD->SetShopOpen(bShopOpen);
+	}
+	RefreshMenuInput();
+}
+
+void AMobaBaseCharacter::SetInventoryOpen(bool bOpen)
+{
+	bInventoryOpen = bOpen;
+	if (InventoryHUD)
+	{
+		InventoryHUD->SetInventoryOpen(bOpen);
+	}
+	RefreshMenuInput();
+}
+
+void AMobaBaseCharacter::RefreshMenuInput()
+{
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC || !PC->IsLocalController())
+	{
+		return;
+	}
+	if (const UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
+	{
+		if (GI->IsShowingLoading())
+		{
+			return;
+		}
+	}
+
+	const bool bNeedMouse = bShopOpen;
+	PC->bShowMouseCursor = bNeedMouse;
+	if (bNeedMouse)
 	{
 		FInputModeGameAndUI Mode;
 		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
@@ -1096,6 +1714,7 @@ void AMobaBaseCharacter::SetShopOpen(bool bOpen)
 void AMobaBaseCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	SetShopOpen(false);
+	SetInventoryOpen(false);
 	if (AbilityHUD)
 	{
 		AbilityHUD->RemoveFromParent();
@@ -1110,6 +1729,11 @@ void AMobaBaseCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		ShopHUD->RemoveFromParent();
 		ShopHUD = nullptr;
+	}
+	if (InventoryHUD)
+	{
+		InventoryHUD->RemoveFromParent();
+		InventoryHUD = nullptr;
 	}
 	if (RespawnHUD)
 	{
@@ -1234,17 +1858,20 @@ void AMobaBaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(AMobaBaseCharacter, HasteUntilTime);
 	DOREPLIFETIME(AMobaBaseCharacter, CooldownSanity);
 	DOREPLIFETIME(AMobaBaseCharacter, bInShopRange);
+	DOREPLIFETIME(AMobaBaseCharacter, PurchasedOffers);
 	DOREPLIFETIME(AMobaBaseCharacter, RespawnAtTime);
 }
 
-void AMobaBaseCharacter::HandleDeath()
+void AMobaBaseCharacter::HandleDeath(AActor* Killer)
 {
 	if (bDead || !HasAuthority())
 	{
 		return;
 	}
 
+	AwardKillGold(this, Killer);
 	bDead = true;
+	ClearPlayerKillCredit();
 	ClearAllStatus();
 	CancelHoldAbility();
 	if (AbilitySystemComponent)
@@ -1252,9 +1879,23 @@ void AMobaBaseCharacter::HandleDeath()
 		AbilitySystemComponent->CancelAbilities();
 		AbilitySystemComponent->AddLooseGameplayTag(FGameplayTag::RequestGameplayTag(FName("State.Dead"), false));
 	}
-	ApplyDeathPresentation();
 	RespawnAtTime = GetServerTimeSeconds() + RespawnDelay;
+	ApplyDeathPresentation();
 	GetWorldTimerManager().SetTimer(RespawnTimer, this, &AMobaBaseCharacter::Respawn, RespawnDelay, false);
+}
+
+void AMobaBaseCharacter::FellOutOfWorld(const UDamageType& DmgType)
+{
+	(void)DmgType;
+	if (bDead)
+	{
+		return;
+	}
+	if (AttributeSet)
+	{
+		AttributeSet->SetHealth(0.f);
+	}
+	HandleDeath();
 }
 
 void AMobaBaseCharacter::Respawn()
@@ -1281,11 +1922,14 @@ void AMobaBaseCharacter::Respawn()
 		if (AActor* Start = GM->FindPlayerStart(GetController()))
 		{
 			TeleportTo(Start->GetActorLocation(), Start->GetActorRotation());
+			SnapFacingToSpawn(Start->GetActorRotation());
 		}
 	}
 
 	ClearAllStatus();
 	ApplyAlivePresentation();
+	bIgnoreShopRangeChanges = false;
+	ScheduleShopRangeRefresh();
 }
 
 void AMobaBaseCharacter::PlayDeathAnimation()
@@ -1331,11 +1975,21 @@ void AMobaBaseCharacter::ApplyDeathPresentation()
 	{
 		HealthWidget->SetHiddenInGame(true);
 	}
+	RefreshCrosshairVisibility();
+	bIgnoreShopRangeChanges = true;
 	SetActorEnableCollision(false);
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
 	{
 		Movement->DisableMovement();
 		Movement->StopMovementImmediately();
+	}
+	if (IsLocallyControlled())
+	{
+		CreateRespawnHUD();
+		if (RespawnHUD)
+		{
+			RespawnHUD->Refresh();
+		}
 	}
 }
 
@@ -1346,10 +2000,16 @@ void AMobaBaseCharacter::ApplyAlivePresentation()
 	{
 		HealthWidget->SetHiddenInGame(IsLocallyControlled());
 	}
+	RefreshCrosshairVisibility();
 	SetActorEnableCollision(true);
+	UpdateOverlaps();
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
 	{
 		Movement->SetMovementMode(MOVE_Walking);
+	}
+	if (RespawnHUD)
+	{
+		RespawnHUD->Refresh();
 	}
 }
 
@@ -1367,7 +2027,7 @@ void AMobaBaseCharacter::OnRep_Dead()
 
 void AMobaBaseCharacter::Move(const FInputActionValue& Value)
 {
-	if (bDead || bStunned)
+	if (bDead || bStunned || !Controller)
 	{
 		return;
 	}
@@ -1388,12 +2048,23 @@ void AMobaBaseCharacter::Look(const FInputActionValue& Value)
 	AddControllerPitchInput(Axis.Y);
 }
 
-void AMobaBaseCharacter::GrantAbility(TSubclassOf<UGameplayAbility> AbilityClass)
+void AMobaBaseCharacter::GrantAbility(TSubclassOf<UGameplayAbility> AbilityClass, int32 SlotIndex)
 {
-	if (AbilityClass)
+	if (!AbilityClass || !AbilitySystemComponent)
 	{
-		AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1, INDEX_NONE, this));
+		return;
 	}
+
+	if (FGameplayAbilitySpec* Existing = AbilitySystemComponent->FindAbilitySpecFromClass(AbilityClass))
+	{
+		if (SlotIndex >= 0)
+		{
+			Existing->InputID = SlotIndex;
+		}
+		return;
+	}
+
+	AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1, SlotIndex, this));
 }
 
 void AMobaBaseCharacter::NotifyNotEnoughEnergy()
@@ -1465,15 +2136,16 @@ void AMobaBaseCharacter::BeginHoldAbility(TSubclassOf<UGameplayAbility> AbilityC
 		return;
 	}
 
-	if (CDO->CooldownTag.IsValid() && AbilitySystemComponent
-		&& AbilitySystemComponent->HasMatchingGameplayTag(CDO->CooldownTag))
+	const FGameplayTag SlotCooldown = GetCooldownTagForAbilityClass(AbilityClass);
+	if (SlotCooldown.IsValid() && AbilitySystemComponent
+		&& AbilitySystemComponent->HasMatchingGameplayTag(SlotCooldown))
 	{
-		const FTimerHandle* Handle = CooldownHandles.Find(CDO->CooldownTag);
+		const FTimerHandle* Handle = CooldownHandles.Find(SlotCooldown);
 		if (Handle && GetWorldTimerManager().IsTimerActive(*Handle))
 		{
 			return;
 		}
-		ClearCooldown(CDO->CooldownTag);
+		ClearCooldown(SlotCooldown);
 	}
 
 	if (!HasEnergy(CDO->EnergyCost))
@@ -1563,7 +2235,8 @@ void AMobaBaseCharacter::MulticastSkillshotVfx_Implementation(
 	FRotator Rotation,
 	FVector Dir,
 	float Speed,
-	float Lifetime)
+	float Lifetime,
+	float ExplodeAtZ)
 {
 	if (IsLocallyControlled() || !Class)
 	{
@@ -1583,6 +2256,10 @@ void AMobaBaseCharacter::MulticastSkillshotVfx_Implementation(
 	if (AMobaProjectile* Bolt = World->SpawnActor<AMobaProjectile>(Class, Start, Rotation, Params))
 	{
 		Bolt->InitFlight(Dir, Speed, 0.f, Lifetime, true);
+		if (ExplodeAtZ > -1.e8f)
+		{
+			Bolt->SetExplodeAtZ(ExplodeAtZ);
+		}
 	}
 }
 
@@ -1593,6 +2270,15 @@ void AMobaBaseCharacter::MulticastGroundBlastVfx_Implementation(FVector Location
 		return;
 	}
 	PlayGroundBlastDebug(Location, Radius, Lifetime);
+}
+
+void AMobaBaseCharacter::MulticastFireRingVfx_Implementation(float Radius, float Lifetime)
+{
+	if (IsLocallyControlled())
+	{
+		return;
+	}
+	PlayFireRingDebug(Radius, Lifetime);
 }
 
 void AMobaBaseCharacter::PlayAbilitySfx(USoundBase* Override, EMobaSfx Fallback, FVector Location)
@@ -1606,105 +2292,77 @@ void AMobaBaseCharacter::PlayAbilitySfx(USoundBase* Override, EMobaSfx Fallback,
 
 void AMobaBaseCharacter::MulticastAbilitySfx_Implementation(USoundBase* Override, EMobaSfx Fallback, FVector Location)
 {
-	if (GetNetMode() != NM_Client || IsLocallyControlled())
+	if (HasAuthority() || IsLocallyControlled())
 	{
 		return;
 	}
 	UMobaSfx::Play(this, Override, Fallback, Location);
 }
 
-void AMobaBaseCharacter::ServerConfirmGroundTarget_Implementation(FVector Location)
+void AMobaBaseCharacter::ServerConfirmGroundTarget_Implementation(TSubclassOf<UGameplayAbility> AbilityClass, FVector Location)
 {
-	if (!AbilitySystemComponent)
+	if (!AbilitySystemComponent || !AbilityClass)
 	{
 		return;
 	}
-
-	const FGameplayTag ActivateTag = FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget.Activate"), false);
-	FGameplayEventData EventData;
-	EventData.EventTag = ActivateTag;
-	EventData.Instigator = this;
-	EventData.Target = this;
-	EventData.TargetData = UMobaGameplayAbility::MakeLocationTargetData(Location);
-	AbilitySystemComponent->HandleGameplayEvent(ActivateTag, &EventData);
-}
-
-void AMobaBaseCharacter::PressAbility1()
-{
-	PressAbility(Ability1);
-}
-
-void AMobaBaseCharacter::PressAbility2()
-{
-	PressAbility(Ability2);
-}
-
-void AMobaBaseCharacter::PressAbility3()
-{
-	PressAbility(Ability3);
-}
-
-void AMobaBaseCharacter::PressAbility4()
-{
-	PressAbility(Ability4);
-}
-
-void AMobaBaseCharacter::ReleaseAbility1()
-{
-	ReleaseAbility(Ability1);
-}
-
-void AMobaBaseCharacter::ReleaseAbility2()
-{
-	ReleaseAbility(Ability2);
-}
-
-void AMobaBaseCharacter::ReleaseAbility3()
-{
-	ReleaseAbility(Ability3);
-}
-
-void AMobaBaseCharacter::ReleaseAbility4()
-{
-	ReleaseAbility(Ability4);
-}
-
-void AMobaBaseCharacter::ApplySfxListenerMute()
-{
-	APlayerController* PC = Cast<APlayerController>(GetController());
-	if (!PC)
+	const FGameplayTag CastingTag = FGameplayTag::RequestGameplayTag(FName("State.GroundCasting"), false);
+	if (CastingTag.IsValid())
 	{
-		return;
+		AbilitySystemComponent->RemoveLooseGameplayTag(CastingTag);
 	}
-
-	if (bSfxMuted)
+	SetPendingAbilityLocation(Location);
+	if (!AbilitySystemComponent->TryActivateAbilityByClass(AbilityClass))
 	{
-		PC->SetAudioListenerOverride(nullptr, FVector(0.f, 0.f, -10000000.f), FRotator::ZeroRotator);
-	}
-	else
-	{
-		PC->ClearAudioListenerOverride();
+		AbilitySystemComponent->TryActivateAbilityByClass(AbilityClass);
 	}
 }
 
-void AMobaBaseCharacter::ToggleMuteSfx()
+void AMobaBaseCharacter::PressAbilitySlot(int32 SlotIndex)
 {
-	if (!IsLocallyControlled())
-	{
-		return;
-	}
+	PressAbility(GetAbilitySlot(SlotIndex));
+}
 
-	bSfxMuted = !bSfxMuted;
-	ApplySfxListenerMute();
-	if (bSfxMuted)
+void AMobaBaseCharacter::ReleaseAbilitySlot(int32 SlotIndex)
+{
+	ReleaseAbility(GetAbilitySlot(SlotIndex));
+}
+
+int32 AMobaBaseCharacter::FindAbilitySlotByLabel(const TCHAR* Label) const
+{
+	for (int32 i = 0; i < AbilitySlots.Num(); ++i)
 	{
-		if (UWorld* World = GetWorld())
+		if (AbilitySlots[i].KeyLabel.Equals(Label, ESearchCase::IgnoreCase))
 		{
-			if (FAudioDevice* AudioDevice = World->GetAudioDeviceRaw())
-			{
-				AudioDevice->Flush(World);
-			}
+			return i;
 		}
+	}
+	return INDEX_NONE;
+}
+
+void AMobaBaseCharacter::PressAbilityQ()
+{
+	const int32 Slot = FindAbilitySlotByLabel(TEXT("Q"));
+	if (Slot != INDEX_NONE)
+	{
+		PressAbilitySlot(Slot);
+	}
+}
+
+void AMobaBaseCharacter::PressAbilityE()
+{
+	const int32 Slot = FindAbilitySlotByLabel(TEXT("E"));
+	if (Slot != INDEX_NONE)
+	{
+		PressAbilitySlot(Slot);
+	}
+}
+
+void AMobaBaseCharacter::ReleaseAbilityE()
+{
+	const int32 Slot = FindAbilitySlotByLabel(TEXT("E"));
+	if (Slot != INDEX_NONE)
+	{
+		ReleaseAbilitySlot(Slot);
 	}
 }
 
@@ -1713,52 +2371,57 @@ void AMobaBaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
 	UEnhancedInputComponent* Enhanced = Cast<UEnhancedInputComponent>(PlayerInputComponent);
-	if (JumpAction)
+	if (Enhanced)
 	{
-		Enhanced->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
-		Enhanced->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
-	}
-	if (MoveAction)
-	{
-		Enhanced->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AMobaBaseCharacter::Move);
-	}
-	if (LookAction)
-	{
-		Enhanced->BindAction(LookAction, ETriggerEvent::Triggered, this, &AMobaBaseCharacter::Look);
-	}
-	if (Ability1Input)
-	{
-		Enhanced->BindAction(Ability1Input, ETriggerEvent::Started, this, &AMobaBaseCharacter::PressAbility1);
-		Enhanced->BindAction(Ability1Input, ETriggerEvent::Completed, this, &AMobaBaseCharacter::ReleaseAbility1);
-	}
-	if (Ability2Input)
-	{
-		Enhanced->BindAction(Ability2Input, ETriggerEvent::Started, this, &AMobaBaseCharacter::PressAbility2);
-		Enhanced->BindAction(Ability2Input, ETriggerEvent::Completed, this, &AMobaBaseCharacter::ReleaseAbility2);
-	}
-	if (Ability3Input)
-	{
-		Enhanced->BindAction(Ability3Input, ETriggerEvent::Started, this, &AMobaBaseCharacter::PressAbility3);
-		Enhanced->BindAction(Ability3Input, ETriggerEvent::Completed, this, &AMobaBaseCharacter::ReleaseAbility3);
-	}
-	if (Ability4Input)
-	{
-		Enhanced->BindAction(Ability4Input, ETriggerEvent::Started, this, &AMobaBaseCharacter::PressAbility4);
-		Enhanced->BindAction(Ability4Input, ETriggerEvent::Completed, this, &AMobaBaseCharacter::ReleaseAbility4);
-	}
-	if (ShopInput)
-	{
-		Enhanced->BindAction(ShopInput, ETriggerEvent::Started, this, &AMobaBaseCharacter::ToggleShop);
+		if (JumpAction)
+		{
+			Enhanced->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+			Enhanced->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
+		}
+		if (MoveAction)
+		{
+			Enhanced->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AMobaBaseCharacter::Move);
+		}
+		if (LookAction)
+		{
+			Enhanced->BindAction(LookAction, ETriggerEvent::Triggered, this, &AMobaBaseCharacter::Look);
+		}
+		EnsureAbilitySlots();
+		for (int32 i = 0; i < AbilitySlots.Num(); ++i)
+		{
+			if (AbilitySlots[i].Input)
+			{
+				Enhanced->BindAction(AbilitySlots[i].Input, ETriggerEvent::Started, this, &AMobaBaseCharacter::PressAbilitySlot, i);
+				Enhanced->BindAction(AbilitySlots[i].Input, ETriggerEvent::Completed, this, &AMobaBaseCharacter::ReleaseAbilitySlot, i);
+				Enhanced->BindAction(AbilitySlots[i].Input, ETriggerEvent::Canceled, this, &AMobaBaseCharacter::ReleaseAbilitySlot, i);
+			}
+		}
+		if (ShopInput)
+		{
+			Enhanced->BindAction(ShopInput, ETriggerEvent::Started, this, &AMobaBaseCharacter::ToggleShop);
+		}
 	}
 
 	if (!ShopInput)
 	{
 		PlayerInputComponent->BindKey(EKeys::B, IE_Pressed, this, &AMobaBaseCharacter::ToggleShop);
 	}
-	PlayerInputComponent->BindKey(EKeys::L, IE_Pressed, this, &AMobaBaseCharacter::ToggleMuteSfx);
+	EnsureAbilitySlots();
+	PlayerInputComponent->BindKey(EKeys::Q, IE_Pressed, this, &AMobaBaseCharacter::PressAbilityQ);
+	PlayerInputComponent->BindKey(EKeys::E, IE_Pressed, this, &AMobaBaseCharacter::PressAbilityE);
+	PlayerInputComponent->BindKey(EKeys::E, IE_Released, this, &AMobaBaseCharacter::ReleaseAbilityE);
+	PlayerInputComponent->BindKey(EKeys::Tab, IE_Pressed, this, &AMobaBaseCharacter::ToggleInventory);
+	PlayerInputComponent->BindKey(EKeys::BackSpace, IE_Pressed, this, &AMobaBaseCharacter::ToggleSettings);
 
 	APlayerController* PC = Cast<APlayerController>(GetController());
-	UEnhancedInputLocalPlayerSubsystem* Subsystem =
-		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer());
-	Subsystem->AddMappingContext(InputMapping, 0);
+	ULocalPlayer* LocalPlayer = PC ? PC->GetLocalPlayer() : nullptr;
+	if (!LocalPlayer || !InputMapping)
+	{
+		return;
+	}
+	if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
+		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+	{
+		Subsystem->AddMappingContext(InputMapping, 0);
+	}
 }

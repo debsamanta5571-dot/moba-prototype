@@ -1,17 +1,25 @@
 #include "MobaProjectile.h"
+#include "CollisionQueryParams.h"
+#include "CollisionShape.h"
 #include "Components/PrimitiveComponent.h"
+#include "MobaTower.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/OverlapResult.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "MobaBaseCharacter.h"
 #include "MobaSfx.h"
 
 AMobaProjectile::AMobaProjectile()
 {
-	PrimaryActorTick.bCanEverTick = false;
-	bReplicates = true;
-	SetReplicateMovement(true);
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
+	bReplicates = false;
+	SetReplicateMovement(false);
 	bAlwaysRelevant = false;
 	bOnlyRelevantToOwner = false;
 
@@ -25,6 +33,8 @@ AMobaProjectile::AMobaProjectile()
 	Mesh->SetupAttachment(Collision);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetIsReplicated(false);
+	Mesh->SetCastShadow(false);
+	Mesh->SetCanEverAffectNavigation(false);
 
 	ProjectileMovement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovement"));
 	ProjectileMovement->UpdatedComponent = Collision;
@@ -63,26 +73,38 @@ void AMobaProjectile::InitFlight(
 	float Lifetime,
 	bool bInCosmetic,
 	const TArray<FMobaEffectSpec>& InHitEffects,
-	bool bInHideVisuals)
+	bool bInHideVisuals,
+	bool bInCanDamageTowers)
 {
 	Damage = InDamage;
 	bCosmetic = bInCosmetic;
 	bHideVisuals = bInHideVisuals;
+	bCanDamageTowers = bInCanDamageTowers;
 	bConsumed = false;
+	HomingTarget = nullptr;
 	HitEffects = bInCosmetic ? TArray<FMobaEffectSpec>() : InHitEffects;
 	SetupCollision();
+	SetActorTickEnabled(false);
+	ProjectileMovement->bIsHomingProjectile = false;
+	ProjectileMovement->HomingTargetComponent = nullptr;
+	ProjectileMovement->HomingAccelerationMagnitude = 0.f;
+	ProjectileMovement->bSweepCollision = true;
 
-	if (bCosmetic)
+	if (bCosmetic || bHideVisuals)
 	{
 		SetReplicates(false);
 		SetReplicateMovement(false);
-		SetActorHiddenInGame(false);
-		ShowAllVisuals();
 	}
 	else
 	{
-		SetReplicates(!bHideVisuals);
-		SetReplicateMovement(!bHideVisuals);
+		SetReplicates(true);
+		SetReplicateMovement(true);
+	}
+
+	if (bCosmetic)
+	{
+		SetActorHiddenInGame(false);
+		ShowAllVisuals();
 	}
 
 	if (bHideVisuals)
@@ -113,14 +135,154 @@ void AMobaProjectile::InitFlight(
 	{
 		ForceNetUpdate();
 	}
+
+	ApplyLook();
+}
+
+void AMobaProjectile::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	ApplyLook();
+}
+
+void AMobaProjectile::ApplyLook()
+{
+	if (Collision)
+	{
+		Collision->SetSphereRadius(FMath::Max(CollisionRadius, 1.f), false);
+	}
+
+	if (!Mesh)
+	{
+		return;
+	}
+
+	UStaticMesh* Sphere = BoltMesh;
+	if (!Sphere)
+	{
+		Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	}
+	if (Sphere && Mesh->GetStaticMesh() != Sphere)
+	{
+		Mesh->SetStaticMesh(Sphere);
+	}
+
+	const float Scale = FMath::Max(VisualScale, 0.1f);
+	Mesh->SetRelativeScale3D(FVector(Scale));
+	Mesh->SetCastShadow(false);
+
+	UMaterialInterface* Base = BoltMaterial;
+	if (!Base)
+	{
+		Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Moba/Art/M_MobaBolt.M_MobaBolt"));
+	}
+	if (!Base)
+	{
+		return;
+	}
+
+	if (!BoltMid || BoltMid->Parent != Base)
+	{
+		BoltMid = UMaterialInstanceDynamic::Create(Base, this);
+	}
+	if (BoltMid)
+	{
+		BoltMid->SetVectorParameterValue(TEXT("BoltColor"), BoltColor);
+		Mesh->SetMaterial(0, BoltMid);
+	}
+}
+
+void AMobaProjectile::InitHoming(AActor* Target, float Speed, float InDamage, float Lifetime)
+{
+	const FVector ToTarget = IsValid(Target)
+		? (Target->GetActorLocation() - GetActorLocation())
+		: GetActorForwardVector();
+	InitFlight(ToTarget, Speed, InDamage, FMath::Max(Lifetime, 4.f), false);
+
+	HomingTarget = Target;
+	if (!IsValid(Target) || !ProjectileMovement)
+	{
+		return;
+	}
+
+	Collision->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Ignore);
+	Collision->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
+	Collision->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	ProjectileMovement->bSweepCollision = false;
+	ProjectileMovement->bIsHomingProjectile = true;
+	ProjectileMovement->HomingTargetComponent = Target->GetRootComponent();
+	ProjectileMovement->HomingAccelerationMagnitude = FMath::Max(Speed * 15.f, 25000.f);
+	SetActorTickEnabled(true);
 }
 
 void AMobaProjectile::BeginPlay()
 {
 	Super::BeginPlay();
+	ApplyLook();
 	if (bHideVisuals)
 	{
 		HideAllVisuals();
+	}
+}
+
+void AMobaProjectile::SetImpactRadius(float Radius)
+{
+	ImpactRadius = FMath::Max(0.f, Radius);
+}
+
+void AMobaProjectile::SetExplodeAtZ(float Z)
+{
+	ExplodeAtZ = Z;
+	PrimaryActorTick.bCanEverTick = true;
+	SetActorTickEnabled(true);
+	if (ProjectileMovement && Collision)
+	{
+		ProjectileMovement->SetUpdatedComponent(Collision);
+		ProjectileMovement->bSweepCollision = true;
+		const float DownSpeed = FMath::Max(ProjectileMovement->MaxSpeed, 1.f);
+		ProjectileMovement->Velocity = FVector(0.f, 0.f, -DownSpeed);
+		ProjectileMovement->Activate(true);
+	}
+}
+
+void AMobaProjectile::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (bConsumed)
+	{
+		return;
+	}
+
+	if (ExplodeAtZ > -1.e8f)
+	{
+		if (GetActorLocation().Z <= ExplodeAtZ)
+		{
+			ConsumeAndDestroy(nullptr);
+		}
+		return;
+	}
+
+	if (!ProjectileMovement || !ProjectileMovement->bIsHomingProjectile)
+	{
+		return;
+	}
+
+	AActor* Target = HomingTarget.Get();
+	if (!IsValid(Target))
+	{
+		HomingTarget.Reset();
+		ConsumeAndDestroy(nullptr);
+		return;
+	}
+
+	if (ProjectileMovement && ProjectileMovement->HomingTargetComponent.Get() != Target->GetRootComponent())
+	{
+		ProjectileMovement->HomingTargetComponent = Target->GetRootComponent();
+	}
+
+	if (FVector::DistSquared(GetActorLocation(), Target->GetActorLocation()) <= FMath::Square(HomingHitRadius))
+	{
+		ConsumeAndDestroy(Target);
 	}
 }
 
@@ -186,7 +348,11 @@ void AMobaProjectile::OnSphereBeginOverlap(
 	bool bFromSweep,
 	const FHitResult& SweepResult)
 {
-	if (bConsumed || OtherActor == GetInstigator() || OtherActor == GetOwner() || Cast<AMobaProjectile>(OtherActor))
+	if (bConsumed || !IsValid(OtherActor) || OtherActor == GetInstigator() || OtherActor == GetOwner() || Cast<AMobaProjectile>(OtherActor))
+	{
+		return;
+	}
+	if (HomingTarget.Get() && OtherActor != HomingTarget.Get())
 	{
 		return;
 	}
@@ -200,7 +366,11 @@ void AMobaProjectile::OnHit(
 	FVector NormalImpulse,
 	const FHitResult& Hit)
 {
-	if (OtherActor == GetInstigator() || OtherActor == GetOwner() || Cast<AMobaProjectile>(OtherActor))
+	if (bConsumed || !IsValid(OtherActor) || OtherActor == GetInstigator() || OtherActor == GetOwner() || Cast<AMobaProjectile>(OtherActor))
+	{
+		return;
+	}
+	if (HomingTarget.Get() && OtherActor != HomingTarget.Get())
 	{
 		return;
 	}
@@ -209,8 +379,16 @@ void AMobaProjectile::OnHit(
 
 void AMobaProjectile::OnStop(const FHitResult& ImpactResult)
 {
+	if (bConsumed)
+	{
+		return;
+	}
 	AActor* HitActor = ImpactResult.GetActor();
 	if (HitActor == GetInstigator() || HitActor == GetOwner() || Cast<AMobaProjectile>(HitActor))
+	{
+		return;
+	}
+	if (HomingTarget.Get() && HitActor != HomingTarget.Get())
 	{
 		return;
 	}
@@ -225,15 +403,74 @@ void AMobaProjectile::ConsumeAndDestroy(AActor* DamageTarget)
 	}
 
 	bConsumed = true;
-	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-	if (DamageTarget && !bCosmetic && HasAuthority())
+	SetActorTickEnabled(false);
+	if (ProjectileMovement)
 	{
-		AActor* Source = GetInstigator() ? static_cast<AActor*>(GetInstigator()) : GetOwner();
-		if (AMobaBaseCharacter::ApplyMobaDamage(DamageTarget, Damage, Source))
+		ProjectileMovement->StopMovementImmediately();
+		ProjectileMovement->bIsHomingProjectile = false;
+		ProjectileMovement->HomingTargetComponent = nullptr;
+		ProjectileMovement->bSweepCollision = false;
+	}
+	if (Collision)
+	{
+		Collision->SetGenerateOverlapEvents(false);
+		Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	AActor* Source = GetInstigator() ? static_cast<AActor*>(GetInstigator()) : GetOwner();
+	TSet<AActor*> Damaged;
+	auto TryHit = [this, Source, &Damaged](AActor* Target)
+	{
+		if (!IsValid(Target) || Damaged.Contains(Target) || Target == GetInstigator() || Target == GetOwner())
 		{
-			AMobaBaseCharacter::ApplyMobaEffects(DamageTarget, Source, HitEffects, EMobaEffectTarget::HitActor);
-			AMobaBaseCharacter::ApplyMobaEffects(DamageTarget, Source, HitEffects, EMobaEffectTarget::Self);
+			return;
+		}
+		if (!bCanDamageTowers && Cast<AMobaTower>(Target))
+		{
+			return;
+		}
+		if (AMobaBaseCharacter::ApplyMobaDamage(Target, Damage, Source))
+		{
+			Damaged.Add(Target);
+			AMobaBaseCharacter::ApplyMobaEffects(Target, Source, HitEffects, EMobaEffectTarget::HitActor);
+			if (Damaged.Num() == 1)
+			{
+				AMobaBaseCharacter::ApplyMobaEffects(Target, Source, HitEffects, EMobaEffectTarget::Self);
+			}
+		}
+	};
+
+	if (IsValid(DamageTarget) && !bCosmetic && HasAuthority())
+	{
+		TryHit(DamageTarget);
+	}
+
+	if (!bCosmetic && HasAuthority() && ImpactRadius > 0.f)
+	{
+		UWorld* World = GetWorld();
+		if (World)
+		{
+			TArray<FOverlapResult> Overlaps;
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(MobaProjectileSplash), false, this);
+			Params.AddIgnoredActor(this);
+			if (AActor* Ignore = GetInstigator())
+			{
+				Params.AddIgnoredActor(Ignore);
+			}
+			FCollisionObjectQueryParams Objects;
+			Objects.AddObjectTypesToQuery(ECC_Pawn);
+			Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+			World->OverlapMultiByObjectType(
+				Overlaps,
+				GetActorLocation(),
+				FQuat::Identity,
+				Objects,
+				FCollisionShape::MakeSphere(ImpactRadius),
+				Params);
+			for (const FOverlapResult& Overlap : Overlaps)
+			{
+				TryHit(Overlap.GetActor());
+			}
 		}
 	}
 
@@ -242,21 +479,15 @@ void AMobaProjectile::ConsumeAndDestroy(AActor* DamageTarget)
 
 void AMobaProjectile::SpawnDestroyVfx()
 {
-	if (bHideVisuals || GetNetMode() == NM_DedicatedServer)
+	UWorld* World = GetWorld();
+	if (!World || World->bIsTearingDown || bHideVisuals || GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
 
-	const APawn* Shooter = GetInstigator();
-	const bool bOwnerClient = Shooter && Shooter->IsLocallyControlled() && GetNetMode() == NM_Client;
-	if (bOwnerClient && !bCosmetic)
-	{
-		return;
-	}
+	UMobaSfx::Play(this, DestroySound, DefaultDestroySfx, GetActorLocation());
 
-	UMobaSfx::Play(this, DestroySound, EMobaSfx::ProjectileDestroy, GetActorLocation());
-
-	if (!DestroyVfxClass || !GetWorld())
+	if (!DestroyVfxClass)
 	{
 		return;
 	}
@@ -264,7 +495,7 @@ void AMobaProjectile::SpawnDestroyVfx()
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	Params.Instigator = GetInstigator();
-	AActor* Vfx = GetWorld()->SpawnActor<AActor>(
+	AActor* Vfx = World->SpawnActor<AActor>(
 		DestroyVfxClass,
 		GetActorLocation(),
 		GetActorRotation(),
@@ -277,6 +508,16 @@ void AMobaProjectile::SpawnDestroyVfx()
 			Vfx->SetLifeSpan(DestroyVfxLife);
 		}
 	}
+}
+
+void AMobaProjectile::LifeSpanExpired()
+{
+	if (!bConsumed)
+	{
+		ConsumeAndDestroy(nullptr);
+		return;
+	}
+	Super::LifeSpanExpired();
 }
 
 void AMobaProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)

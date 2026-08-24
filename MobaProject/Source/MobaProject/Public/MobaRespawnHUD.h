@@ -17,6 +17,7 @@ public:
 
 	void SetOwnerCharacter(AMobaBaseCharacter* InOwner);
 	void PlaceInViewport();
+	void Refresh();
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -28,6 +29,9 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<AMobaBaseCharacter> OwnerCharacter;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> TitleText;
 
 	UPROPERTY()
 	TObjectPtr<UTextBlock> TimerText;

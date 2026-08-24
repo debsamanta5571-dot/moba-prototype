@@ -4,10 +4,9 @@
 #include "GameFramework/Actor.h"
 #include "MobaShop.generated.h"
 
+class APawn;
 class UCapsuleComponent;
 class USceneComponent;
-class UStaticMeshComponent;
-class UTextRenderComponent;
 
 UCLASS(Blueprintable)
 class MOBAPROJECT_API AMobaShop : public AActor
@@ -16,6 +15,12 @@ class MOBAPROJECT_API AMobaShop : public AActor
 
 public:
 	AMobaShop();
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	int32 GetTeamId() const { return TeamID; }
+	UCapsuleComponent* GetCapsule() const { return Capsule; }
+	bool ContainsPawn(const APawn* Pawn) const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -42,9 +47,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moba")
 	TObjectPtr<UCapsuleComponent> Capsule;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moba")
-	TObjectPtr<UTextRenderComponent> Label;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moba")
-	TObjectPtr<UStaticMeshComponent> Mesh;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Moba",
+		meta = (ToolTip = "Only this team can use the shop and get shop regen. 1 and 2 match player teams."))
+	int32 TeamID = 1;
 };

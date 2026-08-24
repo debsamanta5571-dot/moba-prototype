@@ -18,11 +18,28 @@ class UCameraComponent;
 class UGameplayAbility;
 class UInputAction;
 class UInputMappingContext;
+
+USTRUCT(BlueprintType)
+struct FMobaAbilityBind
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
+	TSubclassOf<UGameplayAbility> Ability;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
+	TObjectPtr<UInputAction> Input;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
+	FString KeyLabel;
+};
+
 class UMobaAbilityHUD;
 class UMobaAttributeSet;
 class UMobaGoldHUD;
 class UMobaRespawnHUD;
 class UMobaShopHUD;
+class UMobaInventoryHUD;
 class USoundBase;
 class UTexture2D;
 class USpringArmComponent;
@@ -52,6 +69,10 @@ public:
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
 	static bool ApplyMobaDamage(AActor* Target, float Amount, AActor* Instigator);
+	static void AwardKillGold(AActor* Victim, AActor* Killer);
+	void NotePlayerDamageFrom(AMobaBaseCharacter* Player);
+	AMobaBaseCharacter* GetPlayerKillCredit() const;
+	void ClearPlayerKillCredit();
 	static void ApplyMobaEffects(
 		AActor* HitActor,
 		AActor* Instigator,
@@ -63,23 +84,31 @@ public:
 
 	void StartCooldown(FGameplayTag Tag, float Duration);
 	void ClearCooldown(FGameplayTag Tag);
+	static FGameplayTag AbilitySlotTag(int32 SlotIndex);
+	static FGameplayTag AbilitySlotCooldownTag(int32 SlotIndex) { return AbilitySlotTag(SlotIndex); }
+	FGameplayTag GetAbilityTagForSlot(int32 SlotIndex) const;
+	FGameplayTag GetCooldownTagForAbilityClass(TSubclassOf<UGameplayAbility> AbilityClass) const;
+	void SetPendingAbilityLocation(const FVector& Location);
+	FVector ConsumePendingAbilityLocation();
+	bool HasPendingAbilityLocation() const { return bHasPendingAbilityLocation; }
 	FVector GetMoveDashDirection() const;
 	void SetAimRing(AActor* Ring);
 	AActor* GetAimRing() const;
 	void ClearAimRing();
 
 	UFUNCTION(Server, Reliable)
-	void ServerConfirmGroundTarget(FVector Location);
+	void ServerConfirmGroundTarget(TSubclassOf<UGameplayAbility> AbilityClass, FVector Location);
 
 	void BeginPlantedAbility(float MaxDuration = 1.5f);
 	void EndPlantedAbility();
-	void HandleDeath();
+	void HandleDeath(AActor* Killer = nullptr);
 	void Respawn();
 	bool IsDead() const { return bDead; }
 	float GetRespawnRemaining() const;
 	int32 GetTeamId() const { return TeamID; }
 	void SetTeamId(int32 InTeam);
 	void SyncTeamFromPlayerState();
+	void SnapFacingToSpawn(const FRotator& SpawnRot);
 
 	UFUNCTION(BlueprintPure, Category = "Moba")
 	float GetHealth() const;
@@ -108,30 +137,45 @@ public:
 
 	void NotifyEnteredShop();
 	void NotifyLeftShop();
+	void RefreshShopRange();
+	void ScheduleShopRangeRefresh();
 	bool CanUseShop() const;
+	bool IsShopOpen() const { return bShopOpen; }
+	bool CanBuyAnything() const;
 	bool CanBuyShopOffer(int32 Index) const;
 	void TryBuyShopOffer(int32 Index);
 	const TArray<FMobaShopOffer>& GetShopOffers() const { return ShopOffers; }
+	const TArray<FMobaShopOffer>& GetPurchasedOffers() const { return PurchasedOffers; }
 	void RefreshMoveSpeed();
 
 	UFUNCTION(Server, Reliable)
 	void ServerBuyShopOffer(int32 Index);
 
+	UFUNCTION(Server, Reliable)
+	void ServerRequestPlayAgain();
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestReturnToMenu();
+
 	void NotifyDealtDamage(FVector Location, float Amount);
+	void NotifyTakenDamage(FVector Location, float Amount);
+	void NotifyGainedGold(FVector Location, float Amount);
 	bool TryClaimVfx(FName Key);
 	bool TryConsumeAnimNotify(FGameplayTag Tag);
 	void StartGroundAimDebug(float Radius, float MaxRange);
 	void StopGroundAimDebug();
 	void PlayGroundBlastDebug(FVector Location, float Radius, float Lifetime);
+	void PlayFireRingDebug(float Radius, float Lifetime);
 	void PlayAbilitySfx(USoundBase* Override, EMobaSfx Fallback, FVector Location);
-	void ToggleMuteSfx();
-	bool IsSfxMuted() const { return bSfxMuted; }
 
-	UFUNCTION(NetMulticast, Reliable)
+	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastAbilitySfx(USoundBase* Override, EMobaSfx Fallback, FVector Location);
 
 	UFUNCTION(Client, Unreliable)
 	void ClientShowDamageNumber(FVector Location, float Amount);
+
+	UFUNCTION(Client, Unreliable)
+	void ClientShowGoldNumber(FVector Location, float Amount);
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastSkillshotVfx(
@@ -140,15 +184,22 @@ public:
 		FRotator Rotation,
 		FVector Dir,
 		float Speed,
-		float Lifetime);
+		float Lifetime,
+		float ExplodeAtZ = -1.e9f);
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastGroundBlastVfx(FVector Location, float Radius, float Lifetime);
 
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastFireRingVfx(float Radius, float Lifetime);
+
 	TSubclassOf<UGameplayAbility> GetAbilitySlot(int32 Index) const;
+	int32 GetAbilitySlotCount() const;
+	FString GetAbilityKeyLabel(int32 Index) const;
 	void GetAbilityHudInfo(int32 Index, UTexture2D*& OutIcon, float& OutRemaining, float& OutDuration) const;
 
 protected:
+	virtual void PostLoad() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
@@ -158,14 +209,25 @@ protected:
 	virtual void NotifyControllerChanged() override;
 	virtual void PawnClientRestart() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void FellOutOfWorld(const UDamageType& DmgType) override;
 
 	void CreateAbilityHUD();
 	void CreateGoldHUD();
 	void CreateShopHUD();
+	void CreateInventoryHUD();
 	void CreateRespawnHUD();
+	void RefreshCrosshairVisibility();
+	void SpawnFloatingNumber(FVector Location, float Amount, bool bGold);
 	float GetServerTimeSeconds() const;
 	void ToggleShop();
+	void ToggleInventory();
+	void ToggleSettings();
 	void SetShopOpen(bool bOpen);
+	void SetInventoryOpen(bool bOpen);
+	void RefreshMenuInput();
+
+	UFUNCTION()
+	void OnRep_InShopRange();
 	void TickRegen();
 	void InitAttributeSet();
 	void ApplyShopOffer(const FMobaShopOffer& Offer);
@@ -208,6 +270,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UWidgetComponent> HealthWidget;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UWidgetComponent> Crosshair;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputMappingContext> InputMapping;
 
@@ -220,28 +285,31 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputAction> JumpAction;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Abilities", meta = (FormerlySerializedAs = "MeleeAbility"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Abilities")
+	TArray<FMobaAbilityBind> AbilitySlots;
+
+	UPROPERTY()
 	TSubclassOf<UGameplayAbility> Ability1;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Abilities", meta = (FormerlySerializedAs = "MeleeAction"))
+	UPROPERTY()
 	TObjectPtr<UInputAction> Ability1Input;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Abilities", meta = (FormerlySerializedAs = "SkillshotAbility"))
+	UPROPERTY()
 	TSubclassOf<UGameplayAbility> Ability2;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Abilities", meta = (FormerlySerializedAs = "SkillshotAction"))
+	UPROPERTY()
 	TObjectPtr<UInputAction> Ability2Input;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Abilities")
+	UPROPERTY()
 	TSubclassOf<UGameplayAbility> Ability3;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Abilities")
+	UPROPERTY()
 	TObjectPtr<UInputAction> Ability3Input;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Abilities")
+	UPROPERTY()
 	TSubclassOf<UGameplayAbility> Ability4;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Abilities")
+	UPROPERTY()
 	TObjectPtr<UInputAction> Ability4Input;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Input")
@@ -249,26 +317,24 @@ protected:
 
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
-	void PressAbility1();
-	void PressAbility2();
-	void PressAbility3();
-	void PressAbility4();
-	void ReleaseAbility1();
-	void ReleaseAbility2();
-	void ReleaseAbility3();
-	void ReleaseAbility4();
+	void PressAbilitySlot(int32 SlotIndex);
+	void ReleaseAbilitySlot(int32 SlotIndex);
+	void PressAbilityQ();
+	void PressAbilityE();
+	void ReleaseAbilityE();
+	int32 FindAbilitySlotByLabel(const TCHAR* Label) const;
+	void EnsureAbilitySlots();
 
-	void GrantAbility(TSubclassOf<UGameplayAbility> AbilityClass);
+	void GrantAbility(TSubclassOf<UGameplayAbility> AbilityClass, int32 SlotIndex = INDEX_NONE);
 	void PressAbility(TSubclassOf<UGameplayAbility> AbilityClass);
 	void ReleaseAbility(TSubclassOf<UGameplayAbility> AbilityClass);
 	void BeginHoldAbility(TSubclassOf<UGameplayAbility> AbilityClass);
 	void ConfirmHoldAbility();
 	void CancelHoldAbility();
-	void ApplySfxListenerMute();
-
-	bool bSfxMuted = false;
 
 	TSubclassOf<UGameplayAbility> HeldAbilityClass;
+	FVector PendingAbilityLocation = FVector::ZeroVector;
+	bool bHasPendingAbilityLocation = false;
 	TObjectPtr<AActor> AimRing;
 	FName LastVfxKey;
 	float LastVfxTime = -100.f;
@@ -279,6 +345,9 @@ protected:
 	float GroundBlastRadius = 250.f;
 	float GroundBlastDuration = 0.55f;
 	float GroundBlastStartTime = -100.f;
+	float FireRingRadius = 260.f;
+	float FireRingDuration = 0.7f;
+	float FireRingStartTime = -100.f;
 	FGameplayTag LastAnimNotifyTag;
 	float LastAnimNotifyTime = -100.f;
 	TMap<FGameplayTag, FTimerHandle> CooldownHandles;
@@ -298,7 +367,11 @@ protected:
 	TObjectPtr<UMobaShopHUD> ShopHUD;
 
 	UPROPERTY()
+	TObjectPtr<UMobaInventoryHUD> InventoryHUD;
+
+	UPROPERTY()
 	TObjectPtr<UMobaRespawnHUD> RespawnHUD;
+
 	int32 PlantedAbilityCount = 0;
 	float DefaultMaxWalkSpeed = 500.f;
 
@@ -320,6 +393,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
 	float RespawnDelay = 5.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba", meta = (ClampMin = "0.0"))
+	float PlayerKillCreditSeconds = 15.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
 	TObjectPtr<UAnimationAsset> DeathAnimation;
 
@@ -327,10 +403,10 @@ protected:
 	float RespawnAtTime = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
-	float DefaultMaxHealth = 100.f;
+	float DefaultMaxHealth = 500.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
-	float DefaultMaxEnergy = 100.f;
+	float DefaultMaxEnergy = 500.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
 	float DefaultHealthRegen = 2.f;
@@ -343,6 +419,9 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
 	float DefaultGoldOnKill = 100.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
+	float DefaultGoldRegen = 2.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Attributes")
 	float DefaultDamageModifier = 1.f;
@@ -358,6 +437,12 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Shop")
 	TArray<FMobaShopOffer> ShopOffers;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Shop", meta = (ClampMin = "0.0"))
+	float ShopHealthRegenBonus = 30.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Shop", meta = (ClampMin = "0.0"))
+	float ShopEnergyRegenBonus = 45.f;
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Moba")
 	int32 TeamID = 0;
@@ -380,10 +465,18 @@ protected:
 	FTimerHandle HasteTimer;
 	FTimerHandle PlantedTimer;
 	FTimerHandle RegenTimer;
+	FTimerHandle PlayerKillCreditTimer;
+	TWeakObjectPtr<AMobaBaseCharacter> LastPlayerDamager;
+	float PlayerKillCreditUntilTime = 0.f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_InShopRange)
+	bool bInShopRange = false;
 
 	UPROPERTY(Replicated)
-	bool bInShopRange = false;
+	TArray<FMobaShopOffer> PurchasedOffers;
 
 	int32 ShopRangeCount = 0;
 	bool bShopOpen = false;
+	bool bInventoryOpen = false;
+	bool bIgnoreShopRangeChanges = false;
 };

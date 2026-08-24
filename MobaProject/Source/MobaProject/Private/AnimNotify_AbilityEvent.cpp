@@ -6,6 +6,36 @@
 #include "GameplayTagContainer.h"
 #include "MobaBaseCharacter.h"
 
+namespace
+{
+	FGameplayTag ResolveAbilityNotifyTag(const FGameplayTag& Tag)
+	{
+		if (!Tag.IsValid())
+		{
+			return Tag;
+		}
+		if (Tag == FGameplayTag::RequestGameplayTag(FName("Event.Melee.Hit"), false))
+		{
+			return FGameplayTag::RequestGameplayTag(FName("Ability.1"), false);
+		}
+		if (Tag == FGameplayTag::RequestGameplayTag(FName("Event.Skillshot.Fire"), false))
+		{
+			return FGameplayTag::RequestGameplayTag(FName("Ability.2"), false);
+		}
+		if (Tag == FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget.Blast"), false))
+		{
+			return FGameplayTag::RequestGameplayTag(FName("Ability.3"), false);
+		}
+		return Tag;
+	}
+}
+
+FString UAnimNotify_AbilityEvent::GetNotifyName_Implementation() const
+{
+	const FGameplayTag Tag = ResolveAbilityNotifyTag(EventTag);
+	return Tag.IsValid() ? Tag.ToString() : TEXT("Ability Notify");
+}
+
 void UAnimNotify_AbilityEvent::Notify(
 	USkeletalMeshComponent* MeshComp,
 	UAnimSequenceBase* Animation,
@@ -13,11 +43,7 @@ void UAnimNotify_AbilityEvent::Notify(
 {
 	Super::Notify(MeshComp, Animation, EventReference);
 
-	FGameplayTag Tag = EventTag;
-	if (!Tag.IsValid() && !DefaultEventTagName.IsNone())
-	{
-		Tag = FGameplayTag::RequestGameplayTag(DefaultEventTagName, false);
-	}
+	const FGameplayTag Tag = ResolveAbilityNotifyTag(EventTag);
 	if (!Tag.IsValid() || !MeshComp)
 	{
 		return;
@@ -49,12 +75,6 @@ void UAnimNotify_AbilityEvent::Notify(
 		{
 			return;
 		}
-	}
-
-	if (Tag == FGameplayTag::RequestGameplayTag(FName("Event.Skillshot.Fire"), false)
-		|| Tag == FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget.Blast"), false))
-	{
-		return;
 	}
 
 	const IAbilitySystemInterface* ASI = Cast<IAbilitySystemInterface>(Owner);

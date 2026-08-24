@@ -1,36 +1,20 @@
 #include "GA_MobaSkillshot.h"
+#include "Abilities/GameplayAbilityTypes.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
+#include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Animation/AnimMontage.h"
-#include "AnimNotify_SkillshotFire.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "MobaBaseCharacter.h"
 #include "MobaProjectile.h"
 #include "TimerManager.h"
 
-namespace
-{
-	float SkillshotFireDelay(UAnimMontage* Montage)
-	{
-		if (Montage)
-		{
-			for (const FAnimNotifyEvent& Event : Montage->Notifies)
-			{
-				if (Event.Notify && Event.Notify->IsA(UAnimNotify_SkillshotFire::StaticClass()))
-				{
-					return FMath::Max(0.f, Event.GetTriggerTime());
-				}
-			}
-		}
-		return 0.2f;
-	}
-}
-
 UGA_MobaSkillshot::UGA_MobaSkillshot()
 {
-	CooldownTag = FGameplayTag::RequestGameplayTag(FName("Cooldown.Skillshot"), false);
 	Cooldown = 1.5f;
 	EnergyCost = 25.f;
 	DefaultCastSfx = EMobaSfx::SkillshotFire;
+	AnimNotifyTag = FGameplayTag::RequestGameplayTag(FName("Ability.2"), false);
 }
 
 void UGA_MobaSkillshot::ActivateAbility(
@@ -69,19 +53,22 @@ void UGA_MobaSkillshot::ActivateAbility(
 	PlayMontage->OnCancelled.AddDynamic(this, &UGA_MobaSkillshot::OnMontageDone);
 	PlayMontage->ReadyForActivation();
 
-	const float Delay = SkillshotFireDelay(SkillshotMontage);
-	if (UWorld* World = Character->GetWorld())
+	const FGameplayTag NotifyTag = ResolveNotifyTag(Character);
+	if (NotifyTag.IsValid())
 	{
-		World->GetTimerManager().ClearTimer(FireTimer);
-		if (Delay <= KINDA_SMALL_NUMBER)
-		{
-			FireShot();
-		}
-		else
-		{
-			World->GetTimerManager().SetTimer(FireTimer, this, &UGA_MobaSkillshot::FireShot, Delay, false);
-		}
+		UAbilityTask_WaitGameplayEvent* WaitNotify = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(
+			this,
+			NotifyTag,
+			nullptr,
+			true);
+		WaitNotify->EventReceived.AddDynamic(this, &UGA_MobaSkillshot::OnAnimNotify);
+		WaitNotify->ReadyForActivation();
 	}
+}
+
+void UGA_MobaSkillshot::OnAnimNotify(FGameplayEventData Payload)
+{
+	FireShot();
 }
 
 void UGA_MobaSkillshot::FireShot()
@@ -127,10 +114,6 @@ void UGA_MobaSkillshot::EndAbility(
 		bEndedThisCast = true;
 		if (AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo()))
 		{
-			if (UWorld* World = Character->GetWorld())
-			{
-				World->GetTimerManager().ClearTimer(FireTimer);
-			}
 			Character->EndPlantedAbility();
 		}
 	}
@@ -146,7 +129,7 @@ void UGA_MobaSkillshot::SpawnBolt(bool bCosmetic, bool bHideVisuals)
 	}
 
 	const FVector Dir = Character->GetControlRotation().Vector();
-	const FVector Start = Character->GetActorLocation() + FVector(0.f, 0.f, 40.f) + Dir * 80.f;
+	const FVector Start = GetSpawnLocation(Character);
 
 	UWorld* World = Character->GetWorld();
 	if (!World)
@@ -172,6 +155,30 @@ void UGA_MobaSkillshot::SpawnBolt(bool bCosmetic, bool bHideVisuals)
 			Lifetime,
 			bCosmetic,
 			bCosmetic ? TArray<FMobaEffectSpec>() : Effects,
-			bHideVisuals);
+			bHideVisuals,
+			bCanDamageTowers);
 	}
+}
+
+FVector UGA_MobaSkillshot::GetSpawnLocation(AMobaBaseCharacter* Character) const
+{
+	if (!Character)
+	{
+		return FVector::ZeroVector;
+	}
+
+	FVector Base = Character->GetActorLocation();
+	if (!SpawnSocket.IsNone())
+	{
+		if (USkeletalMeshComponent* Mesh = Character->GetMesh())
+		{
+			if (Mesh->DoesSocketExist(SpawnSocket))
+			{
+				Base = Mesh->GetSocketLocation(SpawnSocket);
+			}
+		}
+	}
+
+	const FRotator Yaw(0.f, Character->GetControlRotation().Yaw, 0.f);
+	return Base + Yaw.RotateVector(SpawnOffset);
 }

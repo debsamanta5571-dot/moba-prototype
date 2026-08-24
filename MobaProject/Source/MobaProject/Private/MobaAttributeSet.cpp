@@ -1,6 +1,7 @@
 #include "MobaAttributeSet.h"
 #include "AbilitySystemInterface.h"
 #include "MobaBaseCharacter.h"
+#include "MobaMinion.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/UObjectHash.h"
 
@@ -14,6 +15,7 @@ UMobaAttributeSet::UMobaAttributeSet()
 	InitEnergyRegen(5.f);
 	InitGold(0.f);
 	InitGoldOnKill(0.f);
+	InitGoldRegen(2.f);
 	InitDamageModifier(1.f);
 	InitCooldownReduction(0.f);
 	InitDamageResistance(0.f);
@@ -62,6 +64,7 @@ void UMobaAttributeSet::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME_CONDITION_NOTIFY(UMobaAttributeSet, EnergyRegen, COND_None, REPNOTIFY_Always);
 	DOREPLIFETIME_CONDITION_NOTIFY(UMobaAttributeSet, Gold, COND_None, REPNOTIFY_Always);
 	DOREPLIFETIME_CONDITION_NOTIFY(UMobaAttributeSet, GoldOnKill, COND_None, REPNOTIFY_Always);
+	DOREPLIFETIME_CONDITION_NOTIFY(UMobaAttributeSet, GoldRegen, COND_None, REPNOTIFY_Always);
 	DOREPLIFETIME_CONDITION_NOTIFY(UMobaAttributeSet, DamageModifier, COND_None, REPNOTIFY_Always);
 	DOREPLIFETIME_CONDITION_NOTIFY(UMobaAttributeSet, CooldownReduction, COND_None, REPNOTIFY_Always);
 	DOREPLIFETIME_CONDITION_NOTIFY(UMobaAttributeSet, DamageResistance, COND_None, REPNOTIFY_Always);
@@ -108,6 +111,11 @@ void UMobaAttributeSet::OnRep_GoldOnKill(const FGameplayAttributeData& OldGoldOn
 	GAMEPLAYATTRIBUTE_REPNOTIFY(UMobaAttributeSet, GoldOnKill, OldGoldOnKill);
 }
 
+void UMobaAttributeSet::OnRep_GoldRegen(const FGameplayAttributeData& OldGoldRegen)
+{
+	GAMEPLAYATTRIBUTE_REPNOTIFY(UMobaAttributeSet, GoldRegen, OldGoldRegen);
+}
+
 void UMobaAttributeSet::OnRep_DamageModifier(const FGameplayAttributeData& OldDamageModifier)
 {
 	GAMEPLAYATTRIBUTE_REPNOTIFY(UMobaAttributeSet, DamageModifier, OldDamageModifier);
@@ -129,5 +137,9 @@ void UMobaAttributeSet::OnRep_MoveSpeed(const FGameplayAttributeData& OldMoveSpe
 	if (AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(GetOwningActor()))
 	{
 		Hero->RefreshMoveSpeed();
+	}
+	else if (AMobaMinion* Minion = Cast<AMobaMinion>(GetOwningActor()))
+	{
+		Minion->RefreshMoveSpeed();
 	}
 }

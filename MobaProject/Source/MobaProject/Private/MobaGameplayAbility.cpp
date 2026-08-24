@@ -1,6 +1,7 @@
 #include "MobaGameplayAbility.h"
 #include "AbilitySystemComponent.h"
 #include "MobaBaseCharacter.h"
+#include "MobaTower.h"
 
 UMobaGameplayAbility::UMobaGameplayAbility()
 {
@@ -25,7 +26,8 @@ bool UMobaGameplayAbility::CanActivateAbility(
 
 	if (ActorInfo && ActorInfo->AbilitySystemComponent.IsValid())
 	{
-		if (CooldownTag.IsValid() && ActorInfo->AbilitySystemComponent->HasMatchingGameplayTag(CooldownTag))
+		const FGameplayTag ActiveCooldown = ResolveCooldownTag(ActorInfo->AvatarActor.Get());
+		if (ActiveCooldown.IsValid() && ActorInfo->AbilitySystemComponent->HasMatchingGameplayTag(ActiveCooldown))
 		{
 			return false;
 		}
@@ -54,6 +56,11 @@ bool UMobaGameplayAbility::CanActivateAbility(
 
 bool UMobaGameplayAbility::ApplyAbilityHit(AActor* Target, float InDamage, bool bApplySelfEffects) const
 {
+	if (!bCanDamageTowers && Cast<AMobaTower>(Target))
+	{
+		return false;
+	}
+
 	AActor* Source = GetAvatarActorFromActorInfo();
 	const bool bHit = AMobaBaseCharacter::ApplyMobaDamage(Target, InDamage, Source);
 	if (!bHit)
@@ -127,6 +134,28 @@ void UMobaGameplayAbility::PlayHitSfx(const FVector& Location) const
 	}
 }
 
+FGameplayTag UMobaGameplayAbility::ResolveCooldownTag(const AActor* Avatar) const
+{
+	if (const AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(Avatar))
+	{
+		const FGameplayTag SlotTag = Character->GetCooldownTagForAbilityClass(GetClass());
+		if (SlotTag.IsValid())
+		{
+			return SlotTag;
+		}
+	}
+	return FGameplayTag();
+}
+
+FGameplayTag UMobaGameplayAbility::ResolveNotifyTag(const AActor* Avatar) const
+{
+	if (AnimNotifyTag.IsValid())
+	{
+		return AnimNotifyTag;
+	}
+	return ResolveCooldownTag(Avatar);
+}
+
 void UMobaGameplayAbility::ApplyMobaCooldown() const
 {
 	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
@@ -135,7 +164,7 @@ void UMobaGameplayAbility::ApplyMobaCooldown() const
 		return;
 	}
 
-	Character->StartCooldown(CooldownTag, Cooldown);
+	Character->StartCooldown(ResolveCooldownTag(Character), Cooldown);
 	if (HasAuthority(&CurrentActivationInfo))
 	{
 		Character->SpendEnergy(EnergyCost);

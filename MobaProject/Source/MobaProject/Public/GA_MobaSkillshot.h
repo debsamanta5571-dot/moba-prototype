@@ -4,6 +4,7 @@
 #include "MobaGameplayAbility.h"
 #include "GA_MobaSkillshot.generated.h"
 
+class AMobaBaseCharacter;
 class AMobaProjectile;
 class UAnimMontage;
 struct FGameplayEventData;
@@ -44,16 +45,27 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skillshot")
 	float Lifetime = 2.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skillshot",
+		meta = (ToolTip = "Mesh socket to spawn from. Leave none to use the character location."))
+	FName SpawnSocket;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skillshot",
+		meta = (ToolTip = "Added after the socket or character. X is forward, Y is right, Z is up."))
+	FVector SpawnOffset = FVector(80.f, 0.f, 40.f);
+
 protected:
 	UFUNCTION()
 	void FireShot();
 
 	UFUNCTION()
+	void OnAnimNotify(FGameplayEventData Payload);
+
+	UFUNCTION()
 	void OnMontageDone();
 
 	void SpawnBolt(bool bCosmetic, bool bHideVisuals = false);
+	FVector GetSpawnLocation(AMobaBaseCharacter* Character) const;
 
 	bool bFiredThisCast = false;
 	bool bEndedThisCast = false;
-	FTimerHandle FireTimer;
 };

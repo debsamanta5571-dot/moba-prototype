@@ -16,8 +16,6 @@ enum class EMobaSfx : uint8
 	SkillshotFire,
 	GroundBlast,
 	ProjectileDestroy,
-	MinionAttack,
-	MinionHit,
 	TowerFire
 };
 
@@ -32,7 +30,4 @@ public:
 		USoundBase* Override,
 		EMobaSfx Fallback,
 		const FVector& Location);
-
-	static void ToggleMute(const UObject* WorldContext);
-	static bool IsMuted(const UObject* WorldContext);
 };

@@ -17,6 +17,7 @@ class MOBAPROJECT_API UGA_MobaGroundTarget : public UMobaGameplayAbility
 public:
 	UGA_MobaGroundTarget();
 	virtual void PostInitProperties() override;
+	virtual void PostLoad() override;
 
 	virtual void ActivateAbility(
 		const FGameplayAbilitySpecHandle Handle,
@@ -63,8 +64,12 @@ protected:
 	void FireBlast();
 
 	UFUNCTION()
+	void OnAnimNotify(FGameplayEventData Payload);
+
+	UFUNCTION()
 	void OnMontageDone();
 
+	virtual void ExecuteBlast();
 	void SpawnBlast(bool bCosmetic);
 	void ApplyBlastDamage();
 
@@ -72,5 +77,4 @@ protected:
 	bool bBlastedThisCast = false;
 	bool bEndedThisCast = false;
 	FTimerHandle CastFailsafeTimer;
-	FTimerHandle BlastTimer;
 };

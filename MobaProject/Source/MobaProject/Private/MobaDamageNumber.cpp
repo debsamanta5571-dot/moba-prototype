@@ -5,18 +5,32 @@
 #include "Components/WidgetComponent.h"
 #include "Styling/CoreStyle.h"
 
-void UMobaDamageNumberWidget::SetAmount(float Amount)
+void UMobaDamageNumberWidget::SetAmount(float Amount, bool bInGold)
 {
 	StoredAmount = Amount;
+	bGold = bInGold;
 	ApplyAmount();
+}
+
+FLinearColor UMobaDamageNumberWidget::GetLabelColor(float Alpha) const
+{
+	return bGold
+		? FLinearColor(1.f, 0.84f, 0.12f, Alpha)
+		: FLinearColor(1.f, 0.22f, 0.18f, Alpha);
 }
 
 void UMobaDamageNumberWidget::ApplyAmount()
 {
-	if (Label)
+	if (!Label)
 	{
-		Label->SetText(FText::FromString(FString::Printf(TEXT("%d"), FMath::RoundToInt(StoredAmount))));
+		return;
 	}
+	const int32 Value = FMath::RoundToInt(StoredAmount);
+	Label->SetText(FText::FromString(bGold
+		? FString::Printf(TEXT("+%d"), Value)
+		: FString::Printf(TEXT("%d"), Value)));
+	Label->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", bGold ? 26 : 22));
+	Label->SetColorAndOpacity(FSlateColor(GetLabelColor(1.f)));
 }
 
 void UMobaDamageNumberWidget::SetFade(float Alpha)
@@ -24,8 +38,7 @@ void UMobaDamageNumberWidget::SetFade(float Alpha)
 	SetRenderOpacity(Alpha);
 	if (Label)
 	{
-		FLinearColor Color = FLinearColor(1.f, 0.86f, 0.35f, Alpha);
-		Label->SetColorAndOpacity(FSlateColor(Color));
+		Label->SetColorAndOpacity(FSlateColor(GetLabelColor(Alpha)));
 	}
 }
 
@@ -39,9 +52,11 @@ TSharedRef<SWidget> UMobaDamageNumberWidget::RebuildWidget()
 	{
 		Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Label"));
 		Label->SetJustification(ETextJustify::Center);
-		Label->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.86f, 0.35f, 1.f)));
-		Label->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 22));
-		Label->SetText(FText::FromString(FString::Printf(TEXT("%d"), FMath::RoundToInt(StoredAmount))));
+		Label->SetColorAndOpacity(FSlateColor(GetLabelColor(1.f)));
+		Label->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", bGold ? 26 : 22));
+		Label->SetText(FText::FromString(bGold
+			? FString::Printf(TEXT("+%d"), FMath::RoundToInt(StoredAmount))
+			: FString::Printf(TEXT("%d"), FMath::RoundToInt(StoredAmount))));
 		WidgetTree->RootWidget = Label;
 	}
 	return Super::RebuildWidget();
@@ -66,7 +81,7 @@ AMobaDamageNumber::AMobaDamageNumber()
 	Widget = CreateDefaultSubobject<UWidgetComponent>(TEXT("Widget"));
 	Widget->SetupAttachment(SceneRoot);
 	Widget->SetWidgetSpace(EWidgetSpace::Screen);
-	Widget->SetDrawSize(FVector2D(140.f, 48.f));
+	Widget->SetDrawSize(FVector2D(180.f, 52.f));
 	Widget->SetPivot(FVector2D(0.5f, 0.5f));
 	Widget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Widget->SetTickWhenOffscreen(true);
@@ -83,9 +98,15 @@ void AMobaDamageNumber::BeginPlay()
 	}
 }
 
-void AMobaDamageNumber::Init(float Amount)
+void AMobaDamageNumber::Init(float Amount, bool bInGold)
 {
 	PendingAmount = Amount;
+	bGold = bInGold;
+	if (bGold)
+	{
+		Lifetime = 1.15f;
+		RiseSpeed = 110.f;
+	}
 	if (Widget)
 	{
 		Widget->InitWidget();
@@ -100,10 +121,13 @@ void AMobaDamageNumber::ApplyToWidget()
 	{
 		return;
 	}
-	Widget->InitWidget();
+	if (!Widget->GetWidget())
+	{
+		Widget->InitWidget();
+	}
 	if (UMobaDamageNumberWidget* UI = Cast<UMobaDamageNumberWidget>(Widget->GetWidget()))
 	{
-		UI->SetAmount(PendingAmount);
+		UI->SetAmount(PendingAmount, bGold);
 	}
 }
 
@@ -113,7 +137,6 @@ void AMobaDamageNumber::Tick(float DeltaSeconds)
 
 	Age += DeltaSeconds;
 	AddActorWorldOffset(FVector(0.f, 0.f, RiseSpeed * DeltaSeconds));
-	ApplyToWidget();
 
 	const float FadeStart = Lifetime * 0.45f;
 	const float Alpha = Age < FadeStart

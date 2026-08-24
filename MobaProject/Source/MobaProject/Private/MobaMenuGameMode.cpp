@@ -1,11 +1,68 @@
 #include "MobaMenuGameMode.h"
+#include "AMobaPlayerState.h"
+#include "Camera/CameraActor.h"
+#include "EngineUtils.h"
+#include "GameFramework/HUD.h"
 #include "GameFramework/PlayerController.h"
-#include "GameFramework/SpectatorPawn.h"
-#include "MobaMenuWidget.h"
+#include "MobaGameInstance.h"
 
 AMobaMenuGameMode::AMobaMenuGameMode()
 {
-	DefaultPawnClass = ASpectatorPawn::StaticClass();
+	DefaultPawnClass = nullptr;
+	PlayerStateClass = AMobaPlayerState::StaticClass();
+	HUDClass = nullptr;
+	bUseSeamlessTravel = false;
+}
+
+void AMobaMenuGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
+{
+	Super::InitGame(MapName, Options, ErrorMessage);
+	bUseSeamlessTravel = false;
+}
+
+void AMobaMenuGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
+{
+	if (AMobaPlayerState* PS = NewPlayer ? NewPlayer->GetPlayerState<AMobaPlayerState>() : nullptr)
+	{
+		PS->AssignLobbyName();
+	}
+	AssignLobbyTeam(NewPlayer);
+	if (NewPlayer && NewPlayer->IsLocalController())
+	{
+		if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
+		{
+			GI->ApplyLocalHeroChoice();
+		}
+	}
+	Super::HandleStartingNewPlayer_Implementation(NewPlayer);
+}
+
+void AMobaMenuGameMode::AssignLobbyTeam(AController* Player)
+{
+	AMobaPlayerState* PS = Player ? Player->GetPlayerState<AMobaPlayerState>() : nullptr;
+	if (!PS)
+	{
+		return;
+	}
+	if (PS->TeamID == 1 || PS->TeamID == 2)
+	{
+		return;
+	}
+	if (Player && Player->IsLocalController())
+	{
+		if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
+		{
+			const int32 Pending = GI->GetPendingTeamId();
+			if (Pending == 1 || Pending == 2)
+			{
+				PS->TeamID = Pending;
+				return;
+			}
+		}
+	}
+	const int32 Team = (NextJoinTeam == 2) ? 2 : 1;
+	NextJoinTeam = (Team == 1) ? 2 : 1;
+	PS->TeamID = Team;
 }
 
 void AMobaMenuGameMode::BeginPlay()
@@ -13,22 +70,25 @@ void AMobaMenuGameMode::BeginPlay()
 	Super::BeginPlay();
 
 	APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
-	if (!PC || !PC->IsLocalController())
+	if (PC && PC->IsLocalController())
 	{
-		return;
+		for (TActorIterator<ACameraActor> It(GetWorld()); It; ++It)
+		{
+			PC->SetViewTarget(*It);
+			break;
+		}
 	}
 
-	MenuWidget = CreateWidget<UMobaMenuWidget>(PC, UMobaMenuWidget::StaticClass());
-	if (!MenuWidget)
+	if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
 	{
-		return;
+		GI->HideLoadingScreen();
+		if (GI->ShouldShowLobby())
+		{
+			GI->ShowLobby();
+		}
+		else
+		{
+			GI->ShowMenu();
+		}
 	}
-
-	MenuWidget->AddToViewport(100);
-
-	FInputModeUIOnly InputMode;
-	InputMode.SetWidgetToFocus(MenuWidget->TakeWidget());
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	PC->SetInputMode(InputMode);
-	PC->bShowMouseCursor = true;
 }

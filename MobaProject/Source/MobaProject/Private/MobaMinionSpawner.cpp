@@ -1,4 +1,5 @@
 #include "MobaMinionSpawner.h"
+#include "../AMobaGameMode.h"
 #include "MobaMinion.h"
 #include "MobaTower.h"
 #include "Kismet/GameplayStatics.h"
@@ -14,9 +15,32 @@ void AMobaMinionSpawner::BeginPlay()
 	Super::BeginPlay();
 	if (HasAuthority())
 	{
-		SpawnWave();
-		GetWorldTimerManager().SetTimer(WaveTimer, this, &AMobaMinionSpawner::SpawnWave, WaveInterval, true);
+		TryStartWaves();
 	}
+}
+
+void AMobaMinionSpawner::TryStartWaves()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (const AAMobaGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AAMobaGameMode>() : nullptr)
+	{
+		if (!GM->IsMatchUnlocked())
+		{
+			GetWorldTimerManager().SetTimer(
+				WaitMatchTimer,
+				this,
+				&AMobaMinionSpawner::TryStartWaves,
+				0.25f,
+				false);
+			return;
+		}
+	}
+	GetWorldTimerManager().ClearTimer(WaitMatchTimer);
+	SpawnWave();
+	GetWorldTimerManager().SetTimer(WaveTimer, this, &AMobaMinionSpawner::SpawnWave, WaveInterval, true);
 }
 
 void AMobaMinionSpawner::SpawnWave()
