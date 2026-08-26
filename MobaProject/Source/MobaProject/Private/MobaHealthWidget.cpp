@@ -13,6 +13,7 @@
 #include "GameFramework/PlayerState.h"
 #include "MobaAttributeSet.h"
 #include "MobaBaseCharacter.h"
+#include "MobaCombatLibrary.h"
 #include "MobaMinion.h"
 #include "Styling/CoreStyle.h"
 

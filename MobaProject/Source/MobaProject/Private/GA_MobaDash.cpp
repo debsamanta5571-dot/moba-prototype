@@ -1,8 +1,6 @@
 #include "GA_MobaDash.h"
-#include "Abilities/GameplayAbilityTriggerType.h"
 #include "Abilities/GameplayAbilityTypes.h"
 #include "Abilities/Tasks/AbilityTask_ApplyRootMotionConstantForce.h"
-#include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "MobaBaseCharacter.h"
@@ -12,71 +10,55 @@ UGA_MobaDash::UGA_MobaDash()
 	Cooldown = 3.f;
 	EnergyCost = 20.f;
 	DefaultCastSfx = EMobaSfx::Dash;
-	ActivateEventTag = FGameplayTag::RequestGameplayTag(FName("Event.Dash"), false);
-	bSendMoveDirection = true;
+	bSendMoveDirection = true; // WASD this frame has to ride with the activate or the server dashes the wrong way
+	bPlantOnCast = false;
+	bEndOnMontage = false; // root motion outlives the montage, we EndAbility from OnDashFinished
 
 	ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(FName("State.Dashing"), false));
 	ActivationOwnedTags.AddTag(FGameplayTag::RequestGameplayTag(FName("State.Dashing"), false));
-
-	FAbilityTriggerData Trigger;
-	Trigger.TriggerTag = ActivateEventTag;
-	Trigger.TriggerSource = EGameplayAbilityTriggerSource::GameplayEvent;
-	AbilityTriggers.Add(Trigger);
 }
 
-void UGA_MobaDash::ActivateAbility(
-	const FGameplayAbilitySpecHandle Handle,
-	const FGameplayAbilityActorInfo* ActorInfo,
-	const FGameplayAbilityActivationInfo ActivationInfo,
-	const FGameplayEventData* TriggerEventData)
+void UGA_MobaDash::PostLoad()
 {
-	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
+	Super::PostLoad();
+	AdoptLegacyMontage(DashMontage);
+}
 
-	if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
-	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
-		return;
-	}
-
-	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
+bool UGA_MobaDash::PrepareCast(AMobaBaseCharacter* Character, const FGameplayEventData* TriggerEventData)
+{
 	if (!Character)
 	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
-		return;
+		return false;
 	}
-
-	const FVector Direction = DirectionFromEvent(TriggerEventData, Character);
-	if (Direction.IsNearlyZero())
+	if (Character->HasPendingAbilityDirection())
 	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
-		return;
+		PendingDashDir = Character->ConsumePendingAbilityDirection();
 	}
-
-	ApplyMobaCooldown();
-	PlayCastSfx();
-
-	if (DashMontage)
+	else
 	{
-		UAbilityTask_PlayMontageAndWait* PlayMontage = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
-			this,
-			NAME_None,
-			DashMontage,
-			1.f,
-			NAME_None,
-			true,
-			0.f);
-		PlayMontage->ReadyForActivation();
+		PendingDashDir = DirectionFromEvent(TriggerEventData, Character);
+	}
+	return !PendingDashDir.IsNearlyZero();
+}
+
+void UGA_MobaDash::OnCastStarted(AMobaBaseCharacter* Character)
+{
+	if (!Character)
+	{
+		EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+		return;
 	}
 
 	const float FinishSpeed = Character->GetCharacterMovement()
 		? Character->GetCharacterMovement()->MaxWalkSpeed
 		: 500.f;
 
+	// Root motion goes through CMC so the SavedMove includes it. SetActorLocation on the client rubber-bands.
 	UAbilityTask_ApplyRootMotionConstantForce* DashTask =
 		UAbilityTask_ApplyRootMotionConstantForce::ApplyRootMotionConstantForce(
 			this,
 			FName(TEXT("MobaDash")),
-			Direction,
+			PendingDashDir,
 			DashStrength,
 			DashDuration,
 			false,
@@ -88,7 +70,7 @@ void UGA_MobaDash::ActivateAbility(
 
 	if (!DashTask)
 	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
 		return;
 	}
 
@@ -108,7 +90,7 @@ FVector UGA_MobaDash::DirectionFromEvent(const FGameplayEventData* EventData, co
 		if (const FGameplayAbilityTargetData* Data = EventData->TargetData.Get(0))
 		{
 			FVector Dir = Data->GetEndPoint();
-			Dir.Z = 0.f;
+			Dir.Z = 0.f; // we send a unit vector in the event, not a world point
 			Dir = Dir.GetSafeNormal();
 			if (!Dir.IsNearlyZero())
 			{

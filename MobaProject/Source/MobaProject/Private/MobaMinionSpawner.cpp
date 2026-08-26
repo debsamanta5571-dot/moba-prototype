@@ -1,5 +1,5 @@
 #include "MobaMinionSpawner.h"
-#include "../AMobaGameMode.h"
+#include "MobaGameMode.h"
 #include "MobaMinion.h"
 #include "MobaTower.h"
 #include "Kismet/GameplayStatics.h"
@@ -25,7 +25,7 @@ void AMobaMinionSpawner::TryStartWaves()
 	{
 		return;
 	}
-	if (const AAMobaGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AAMobaGameMode>() : nullptr)
+	if (const AMobaGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AMobaGameMode>() : nullptr)
 	{
 		if (!GM->IsMatchUnlocked())
 		{

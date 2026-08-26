@@ -5,6 +5,7 @@
 #include "GameFramework/Actor.h"
 #include "MobaTower.generated.h"
 
+class AMobaBaseCharacter;
 class AMobaProjectile;
 class UAbilitySystemComponent;
 class UBoxComponent;
@@ -35,6 +36,7 @@ public:
 
 	void HandleDeath();
 	bool IsDead() const { return bDead; }
+	static void NotifyHeroDamagedHero(AMobaBaseCharacter* Attacker, AMobaBaseCharacter* Victim);
 
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -43,7 +45,10 @@ protected:
 	void ConfigureCollision();
 	void PlaceHealthWidget();
 	void Fire();
+	bool IsValidEnemyInRange(const AActor* Other) const;
 	AActor* FindClosestEnemy() const;
+	AActor* ChooseFireTarget();
+	void PullAggro(AActor* Attacker);
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastFireSfx();
@@ -76,8 +81,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
 	TSubclassOf<AMobaProjectile> ProjectileClass;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
-	float Range = 1400.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba|Combat",
+		meta = (ClampMin = "100.0", ToolTip = "Attack radius in centimeters. Instance-editable on placed towers."))
+	float Range = 1700.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moba")
 	float FireInterval = 1.5f;
@@ -114,6 +120,7 @@ protected:
 	float GoldOnKill = 0.f;
 
 	FTimerHandle FireTimer;
+	TWeakObjectPtr<AActor> CurrentTarget;
 
 	UFUNCTION()
 	void OnRep_Dead();

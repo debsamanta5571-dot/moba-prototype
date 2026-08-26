@@ -15,14 +15,9 @@ class MOBAPROJECT_API UGA_MobaDash : public UMobaGameplayAbility
 
 public:
 	UGA_MobaDash();
+	virtual void PostLoad() override;
 
-	virtual void ActivateAbility(
-		const FGameplayAbilitySpecHandle Handle,
-		const FGameplayAbilityActorInfo* ActorInfo,
-		const FGameplayAbilityActivationInfo ActivationInfo,
-		const FGameplayEventData* TriggerEventData) override;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dash")
+	UPROPERTY()
 	TObjectPtr<UAnimMontage> DashMontage;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dash")
@@ -32,8 +27,13 @@ public:
 	float DashDuration = 0.2f;
 
 protected:
+	virtual bool PrepareCast(AMobaBaseCharacter* Character, const FGameplayEventData* TriggerEventData) override;
+	virtual void OnCastStarted(AMobaBaseCharacter* Character) override;
+
 	UFUNCTION()
 	void OnDashFinished();
 
 	static FVector DirectionFromEvent(const FGameplayEventData* EventData, const ACharacter* FallbackCharacter);
+
+	FVector PendingDashDir = FVector::ZeroVector;
 };

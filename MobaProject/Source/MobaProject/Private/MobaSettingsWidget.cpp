@@ -12,6 +12,8 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "GameFramework/PlayerController.h"
+#include "MobaBaseCharacter.h"
 #include "MobaGameInstance.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateBrush.h"
@@ -184,28 +186,45 @@ TSharedRef<SWidget> UMobaSettingsWidget::RebuildWidget()
 			GraphicsSlot->SetHorizontalAlignment(HAlign_Fill);
 		}
 
-		USizeBox* BackSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("BackSize"));
-		BackSize->SetHeightOverride(52.f);
-		BackButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Back"));
+		auto MakeFooterButton = [&](const FName Name, const FString& Label, const FLinearColor& Color, const FLinearColor& TextColor) -> UButton*
 		{
-			const FLinearColor BackColor(0.784f, 0.608f, 0.235f, 1.f);
-			FButtonStyle Style = BackButton->GetStyle();
-			Style.Normal = MakeRoundBrush(BackColor, 10.f);
-			Style.Hovered = MakeRoundBrush(BackColor + FLinearColor(0.08f, 0.10f, 0.10f, 0.f), 10.f);
-			Style.Pressed = MakeRoundBrush(BackColor * 0.82f, 10.f);
+			USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), *FString::Printf(TEXT("%sSize"), *Name.ToString()));
+			Size->SetHeightOverride(52.f);
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+			FButtonStyle Style = Button->GetStyle();
+			Style.Normal = MakeRoundBrush(Color, 10.f);
+			Style.Hovered = MakeRoundBrush(Color + FLinearColor(0.08f, 0.10f, 0.10f, 0.f), 10.f);
+			Style.Pressed = MakeRoundBrush(Color * 0.82f, 10.f);
 			Style.NormalPadding = FMargin(0.f);
 			Style.PressedPadding = FMargin(0.f);
-			BackButton->SetStyle(Style);
+			Button->SetStyle(Style);
+			UTextBlock* ButtonLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), *FString::Printf(TEXT("%sLabel"), *Name.ToString()));
+			ButtonLabel->SetText(FText::FromString(Label));
+			ButtonLabel->SetJustification(ETextJustify::Center);
+			ButtonLabel->SetColorAndOpacity(FSlateColor(TextColor));
+			ButtonLabel->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 18));
+			ButtonLabel->SetVisibility(ESlateVisibility::HitTestInvisible);
+			Button->AddChild(ButtonLabel);
+			Size->AddChild(Button);
+			return Button;
+		};
+
+		BackButton = MakeFooterButton(TEXT("Back"), TEXT("Back"), FLinearColor(0.784f, 0.608f, 0.235f, 1.f), Ink);
+		if (UVerticalBoxSlot* BackSlot = Box->AddChildToVerticalBox(BackButton->GetParent()))
+		{
+			BackSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+			BackSlot->SetHorizontalAlignment(HAlign_Fill);
 		}
-		UTextBlock* BackLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("BackLabel"));
-		BackLabel->SetText(FText::FromString(TEXT("Back")));
-		BackLabel->SetJustification(ETextJustify::Center);
-		BackLabel->SetColorAndOpacity(FSlateColor(Ink));
-		BackLabel->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 18));
-		BackLabel->SetVisibility(ESlateVisibility::HitTestInvisible);
-		BackButton->AddChild(BackLabel);
-		BackSize->AddChild(BackButton);
-		Box->AddChildToVerticalBox(BackSize);
+
+		MenuButton = MakeFooterButton(TEXT("Menu"), TEXT("Main Menu"), FLinearColor(0.471f, 0.353f, 0.157f, 1.f), Cream);
+		if (UVerticalBoxSlot* MenuSlot = Box->AddChildToVerticalBox(MenuButton->GetParent()))
+		{
+			MenuSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+			MenuSlot->SetHorizontalAlignment(HAlign_Fill);
+		}
+
+		QuitButton = MakeFooterButton(TEXT("Quit"), TEXT("Quit"), FLinearColor(0.357f, 0.353f, 0.337f, 1.f), Cream);
+		Box->AddChildToVerticalBox(QuitButton->GetParent());
 
 		WidgetTree->RootWidget = Root;
 	}
@@ -239,6 +258,21 @@ void UMobaSettingsWidget::NativeConstruct()
 	if (BackButton)
 	{
 		BackButton->OnClicked.AddUniqueDynamic(this, &UMobaSettingsWidget::OnBackClicked);
+	}
+	if (MenuButton)
+	{
+		MenuButton->OnClicked.AddUniqueDynamic(this, &UMobaSettingsWidget::OnMenuClicked);
+		bool bOnMenu = false;
+		if (const UWorld* World = GetWorld())
+		{
+			bOnMenu = World->GetMapName().Contains(TEXT("MobaMenu"), ESearchCase::IgnoreCase);
+		}
+		UWidget* MenuRow = MenuButton->GetParent() ? MenuButton->GetParent() : MenuButton;
+		MenuRow->SetVisibility(bOnMenu ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+	if (QuitButton)
+	{
+		QuitButton->OnClicked.AddUniqueDynamic(this, &UMobaSettingsWidget::OnQuitClicked);
 	}
 
 	SetKeyboardFocus();
@@ -350,9 +384,41 @@ void UMobaSettingsWidget::OnBackClicked()
 	}
 }
 
+void UMobaSettingsWidget::OnMenuClicked()
+{
+	UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>();
+	APlayerController* PC = GetOwningPlayer();
+	if (GI && PC && PC->HasAuthority())
+	{
+		GI->ReturnToMenu();
+		return;
+	}
+	if (GI)
+	{
+		GI->ShowLoadingScreen(TEXT("RETURNING TO MENU..."));
+	}
+	if (AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(GetOwningPlayerPawn()))
+	{
+		Hero->ServerRequestReturnToMenu();
+		return;
+	}
+	if (GI)
+	{
+		GI->ReturnToMenu();
+	}
+}
+
+void UMobaSettingsWidget::OnQuitClicked()
+{
+	if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
+	{
+		GI->QuitGame();
+	}
+}
+
 FReply UMobaSettingsWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
-	if (InKeyEvent.GetKey() == EKeys::BackSpace)
+	if (InKeyEvent.GetKey() == EKeys::BackSpace || InKeyEvent.GetKey() == EKeys::Escape)
 	{
 		OnBackClicked();
 		return FReply::Handled();

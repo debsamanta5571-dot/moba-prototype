@@ -2,6 +2,7 @@
 #include "AMobaPlayerState.h"
 #include "Camera/CameraActor.h"
 #include "EngineUtils.h"
+#include "GameFramework/GameStateBase.h"
 #include "GameFramework/HUD.h"
 #include "GameFramework/PlayerController.h"
 #include "MobaGameInstance.h"
@@ -35,6 +36,37 @@ void AMobaMenuGameMode::HandleStartingNewPlayer_Implementation(APlayerController
 		}
 	}
 	Super::HandleStartingNewPlayer_Implementation(NewPlayer);
+	EnsureLobbyLeader();
+	if (AMobaPlayerState* PS = NewPlayer ? NewPlayer->GetPlayerState<AMobaPlayerState>() : nullptr)
+	{
+		if (!PS->bLobbyLeader)
+		{
+			AGameStateBase* GS = GameState.Get();
+			if (!GS && GetWorld())
+			{
+				GS = GetWorld()->GetGameState();
+			}
+			bool bAnyLeader = false;
+			if (GS)
+			{
+				for (APlayerState* Other : GS->PlayerArray)
+				{
+					if (const AMobaPlayerState* OtherMoba = Cast<AMobaPlayerState>(Other))
+					{
+						if (OtherMoba->bLobbyLeader)
+						{
+							bAnyLeader = true;
+							break;
+						}
+					}
+				}
+			}
+			if (!bAnyLeader)
+			{
+				PS->bLobbyLeader = true;
+			}
+		}
+	}
 }
 
 void AMobaMenuGameMode::AssignLobbyTeam(AController* Player)
@@ -65,6 +97,49 @@ void AMobaMenuGameMode::AssignLobbyTeam(AController* Player)
 	PS->TeamID = Team;
 }
 
+void AMobaMenuGameMode::Logout(AController* Exiting)
+{
+	Super::Logout(Exiting);
+	EnsureLobbyLeader();
+}
+
+// Dedicated server has no host pawn. First real player gets Start Game; next in list if they leave.
+void AMobaMenuGameMode::EnsureLobbyLeader()
+{
+	AGameStateBase* GS = GameState;
+	if (!GS)
+	{
+		GS = GetWorld() ? GetWorld()->GetGameState() : nullptr;
+	}
+	if (!GS)
+	{
+		return;
+	}
+
+	AMobaPlayerState* First = nullptr;
+	bool bHasLeader = false;
+	for (APlayerState* PS : GS->PlayerArray)
+	{
+		AMobaPlayerState* MobaPS = Cast<AMobaPlayerState>(PS);
+		if (!MobaPS || MobaPS->IsOnlyASpectator())
+		{
+			continue;
+		}
+		if (!First)
+		{
+			First = MobaPS;
+		}
+		if (MobaPS->bLobbyLeader)
+		{
+			bHasLeader = true;
+		}
+	}
+	if (!bHasLeader && First)
+	{
+		First->bLobbyLeader = true;
+	}
+}
+
 void AMobaMenuGameMode::BeginPlay()
 {
 	Super::BeginPlay();
@@ -81,7 +156,6 @@ void AMobaMenuGameMode::BeginPlay()
 
 	if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
 	{
-		GI->HideLoadingScreen();
 		if (GI->ShouldShowLobby())
 		{
 			GI->ShowLobby();
@@ -90,5 +164,6 @@ void AMobaMenuGameMode::BeginPlay()
 		{
 			GI->ShowMenu();
 		}
+		GI->HideLoadingScreen();
 	}
 }

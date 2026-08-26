@@ -2,6 +2,7 @@
 
 #include "Abilities/GameplayAbility.h"
 #include "Abilities/GameplayAbilityTargetTypes.h"
+#include "Abilities/GameplayAbilityTypes.h"
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "MobaEffect.h"
@@ -9,9 +10,11 @@
 #include "MobaGameplayAbility.generated.h"
 
 class AMobaBaseCharacter;
+class UAnimMontage;
 class USoundBase;
 class UTexture2D;
 
+// Shared cast path: predicted activate, montage notify, cooldown on the ASC (not this object — CanActivate can run on the CDO).
 UCLASS()
 class MOBAPROJECT_API UMobaGameplayAbility : public UGameplayAbility
 {
@@ -19,6 +22,8 @@ class MOBAPROJECT_API UMobaGameplayAbility : public UGameplayAbility
 
 public:
 	UMobaGameplayAbility();
+	virtual void PostInitProperties() override;
+	virtual void PostLoad() override;
 
 	virtual bool CanActivateAbility(
 		const FGameplayAbilitySpecHandle Handle,
@@ -26,6 +31,19 @@ public:
 		const FGameplayTagContainer* SourceTags = nullptr,
 		const FGameplayTagContainer* TargetTags = nullptr,
 		FGameplayTagContainer* OptionalRelevantTags = nullptr) const override;
+
+	virtual void ActivateAbility(
+		const FGameplayAbilitySpecHandle Handle,
+		const FGameplayAbilityActorInfo* ActorInfo,
+		const FGameplayAbilityActivationInfo ActivationInfo,
+		const FGameplayEventData* TriggerEventData) override;
+
+	virtual void EndAbility(
+		const FGameplayAbilitySpecHandle Handle,
+		const FGameplayAbilityActorInfo* ActorInfo,
+		const FGameplayAbilityActivationInfo ActivationInfo,
+		bool bReplicateEndAbility,
+		bool bWasCancelled) override;
 
 	static FGameplayAbilityTargetDataHandle MakeDirectionTargetData(const FVector& Direction);
 	static FGameplayAbilityTargetDataHandle MakeLocationTargetData(const FVector& Location);
@@ -41,18 +59,28 @@ public:
 	float EnergyCost = 20.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability",
-		meta = (ToolTip = "Press/activate event. Dash and ground hold use this. Cooldown still comes from the character slot."))
-	FGameplayTag ActivateEventTag;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability", meta = (Categories = "Ability",
-		ToolTip = "Montage notify to wait for. Cooldown still comes from the character slot."))
-	FGameplayTag AnimNotifyTag;
+		meta = (ToolTip = "Played on activate. Payload fires on the slot notify (Ability.1-4), or immediately if empty."))
+	TObjectPtr<UAnimMontage> CastMontage;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
 	bool bSendMoveDirection = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
 	bool bHoldToAim = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability",
+		meta = (ToolTip = "Slow the caster while the montage / cast is active."))
+	bool bPlantOnCast = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
+	float PlantDuration = 1.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability",
+		meta = (ToolTip = "If on, the ability ends when the montage finishes, or immediately when there is no montage. Dash and beam turn this off."))
+	bool bEndOnMontage = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
+	bool bPlayCastSfxOnStart = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability")
 	TObjectPtr<UTexture2D> Icon;
@@ -83,7 +111,28 @@ public:
 	bool ApplyAbilityHit(AActor* Target, float InDamage, bool bApplySelfEffects = true) const;
 	FGameplayTag ResolveCooldownTag(const AActor* Avatar) const;
 	FGameplayTag ResolveNotifyTag(const AActor* Avatar) const;
+	UAnimMontage* GetCastMontage() const { return CastMontage; }
 
 protected:
 	void ApplyMobaCooldown() const;
+	void AdoptLegacyMontage(UAnimMontage* Legacy);
+
+	virtual bool PrepareCast(AMobaBaseCharacter* Character, const FGameplayEventData* TriggerEventData);
+	virtual void OnCastStarted(AMobaBaseCharacter* Character);
+	virtual void OnCastNotify(FGameplayEventData Payload);
+	virtual void OnCastMontageDone();
+	virtual float GetPlantDuration() const { return PlantDuration; }
+
+	virtual void StartCastMontage();
+	void EndCastPlant();
+
+	UFUNCTION()
+	void HandleCastNotify(FGameplayEventData Payload);
+
+	UFUNCTION()
+	void HandleCastMontageDone();
+
+	bool bCastNotifyFired = false;
+	bool bCastMontageDone = false;
+	bool bPlantedThisCast = false;
 };

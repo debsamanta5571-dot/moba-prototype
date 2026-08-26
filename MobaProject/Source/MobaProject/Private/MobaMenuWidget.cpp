@@ -12,6 +12,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "MobaGameInstance.h"
+#include "Misc/CoreMisc.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
@@ -27,6 +28,7 @@ namespace
 	const FLinearColor Host(0.784f, 0.608f, 0.235f, 1.f);
 	const FLinearColor Join(0.659f, 0.510f, 0.196f, 1.f);
 	const FLinearColor Settings(0.471f, 0.353f, 0.157f, 1.f);
+	const FLinearColor Quit(0.357f, 0.353f, 0.337f, 1.f);
 	const FLinearColor Cream(0.941f, 0.902f, 0.824f, 1.f);
 
 	FSlateBrush MakeRoundBrush(const FLinearColor& Color, float Radius)
@@ -106,6 +108,7 @@ TSharedRef<SWidget> UMobaMenuWidget::RebuildWidget()
 		UBorder* Backdrop = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Backdrop"));
 		Backdrop->SetBrushColor(Bg);
 		Backdrop->SetPadding(FMargin(0.f));
+		Backdrop->SetVisibility(ESlateVisibility::Visible);
 		if (UOverlaySlot* Fill = Root->AddChildToOverlay(Backdrop))
 		{
 			Fill->SetHorizontalAlignment(HAlign_Fill);
@@ -159,8 +162,7 @@ TSharedRef<SWidget> UMobaMenuWidget::RebuildWidget()
 		UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Column"));
 		Card->AddChild(Box);
 
-		AddPadded(Box, MakeLabel(WidgetTree, TEXT("Title"), TEXT("MOBA PROTOTYPE"), 26, Title), 8.f);
-		AddPadded(Box, MakeLabel(WidgetTree, TEXT("Subtitle"), TEXT("Host a match or join one"), 13, Muted), 12.f);
+		AddPadded(Box, MakeLabel(WidgetTree, TEXT("Title"), TEXT("MOBA PROTOTYPE"), 26, Title), 20.f);
 
 		NoticeText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Notice"));
 		NoticeText->SetJustification(ETextJustify::Center);
@@ -186,8 +188,6 @@ TSharedRef<SWidget> UMobaMenuWidget::RebuildWidget()
 
 		HostButton = MakeMenuButton(TEXT("Host"), TEXT("Host"), Host, Ink, 52.f);
 		AddPadded(Box, HostButton->GetParent(), 20.f);
-
-		AddPadded(Box, MakeLabel(WidgetTree, TEXT("JoinHint"), TEXT("Join IP"), 11, Muted), 8.f);
 
 		auto StyleJoinEdit = [&](UEditableTextBox* Edit)
 		{
@@ -271,11 +271,23 @@ TSharedRef<SWidget> UMobaMenuWidget::RebuildWidget()
 		AddPadded(Box, JoinButton->GetParent(), 10.f);
 
 		SettingsButton = MakeMenuButton(TEXT("Settings"), TEXT("Settings"), Settings, Cream, 44.f);
-		Box->AddChildToVerticalBox(SettingsButton->GetParent());
+		AddPadded(Box, SettingsButton->GetParent(), 10.f);
+
+		QuitButton = MakeMenuButton(TEXT("Quit"), TEXT("Quit"), Quit, Cream, 44.f);
+		Box->AddChildToVerticalBox(QuitButton->GetParent());
 
 		WidgetTree->RootWidget = Root;
 	}
 	return Super::RebuildWidget();
+}
+
+void UMobaMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (UMobaGameInstance* GI = Cast<UMobaGameInstance>(GetGameInstance()))
+	{
+		GI->RestoreUiPointerIfNeeded();
+	}
 }
 
 void UMobaMenuWidget::NativeConstruct()
@@ -290,6 +302,15 @@ void UMobaMenuWidget::NativeConstruct()
 	if (HostButton)
 	{
 		HostButton->OnClicked.AddUniqueDynamic(this, &UMobaMenuWidget::OnHostClicked);
+		if (IsRunningClientOnly())
+		{
+			HostButton->SetIsEnabled(false);
+			if (UWidget* HostRow = HostButton->GetParent())
+			{
+				HostRow->SetVisibility(ESlateVisibility::Collapsed);
+			}
+			HostButton->SetVisibility(ESlateVisibility::Collapsed);
+		}
 	}
 	if (JoinButton)
 	{
@@ -307,6 +328,10 @@ void UMobaMenuWidget::NativeConstruct()
 	{
 		SettingsButton->OnClicked.AddUniqueDynamic(this, &UMobaMenuWidget::OnSettingsClicked);
 	}
+	if (QuitButton)
+	{
+		QuitButton->OnClicked.AddUniqueDynamic(this, &UMobaMenuWidget::OnQuitClicked);
+	}
 }
 
 void UMobaMenuWidget::SetNotice(const FString& Message)
@@ -322,6 +347,10 @@ void UMobaMenuWidget::SetNotice(const FString& Message)
 
 void UMobaMenuWidget::OnHostClicked()
 {
+	if (IsRunningClientOnly())
+	{
+		return;
+	}
 	if (UMobaGameInstance* GI = Cast<UMobaGameInstance>(GetGameInstance()))
 	{
 		GI->HostGame();
@@ -416,5 +445,13 @@ void UMobaMenuWidget::OnSettingsClicked()
 	if (UMobaGameInstance* GI = Cast<UMobaGameInstance>(GetGameInstance()))
 	{
 		GI->ShowSettings();
+	}
+}
+
+void UMobaMenuWidget::OnQuitClicked()
+{
+	if (UMobaGameInstance* GI = Cast<UMobaGameInstance>(GetGameInstance()))
+	{
+		GI->QuitGame();
 	}
 }

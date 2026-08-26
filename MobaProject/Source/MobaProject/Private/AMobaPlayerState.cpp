@@ -1,8 +1,9 @@
 #include "AMobaPlayerState.h"
-#include "../AMobaGameMode.h"
+#include "MobaGameMode.h"
 #include "Containers/Set.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
+#include "GameFramework/PlayerController.h"
 #include "MobaGameInstance.h"
 #include "Net/UnrealNetwork.h"
 
@@ -16,6 +17,8 @@ void AMobaPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(AMobaPlayerState, TeamID);
 	DOREPLIFETIME(AMobaPlayerState, HeroIndex);
 	DOREPLIFETIME(AMobaPlayerState, bMatchUnlocked);
+	DOREPLIFETIME(AMobaPlayerState, bAwaitingLoadout);
+	DOREPLIFETIME(AMobaPlayerState, bLobbyLeader);
 }
 
 void AMobaPlayerState::ClientShowLoading_Implementation(const FString& Message)
@@ -26,14 +29,32 @@ void AMobaPlayerState::ClientShowLoading_Implementation(const FString& Message)
 	}
 }
 
+bool AMobaPlayerState::CanEditLoadout() const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+	if (World->GetMapName().Contains(TEXT("MobaMenu")))
+	{
+		return true;
+	}
+	return bAwaitingLoadout;
+}
+
+void AMobaPlayerState::SetAwaitingLoadout(bool bAwaiting)
+{
+	bAwaitingLoadout = bAwaiting;
+}
+
 void AMobaPlayerState::ServerSetTeam_Implementation(int32 NewTeam)
 {
 	if (NewTeam != 1 && NewTeam != 2)
 	{
 		return;
 	}
-	const UWorld* World = GetWorld();
-	if (World && !World->GetMapName().Contains(TEXT("MobaMenu")))
+	if (!CanEditLoadout())
 	{
 		return;
 	}
@@ -46,12 +67,58 @@ void AMobaPlayerState::ServerSetHeroIndex_Implementation(int32 NewIndex)
 	{
 		return;
 	}
-	const UWorld* World = GetWorld();
-	if (World && !World->GetMapName().Contains(TEXT("MobaMenu")))
+	const AController* OwnerController = GetOwningController();
+	const bool bHasPawn = OwnerController && OwnerController->GetPawn();
+	if (bHasPawn && !CanEditLoadout())
 	{
 		return;
 	}
 	HeroIndex = NewIndex;
+}
+
+void AMobaPlayerState::ServerConfirmLoadout_Implementation(int32 NewHero, int32 NewTeam)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	AController* OwnerController = GetOwningController();
+	if (OwnerController && OwnerController->GetPawn())
+	{
+		bAwaitingLoadout = false;
+		return;
+	}
+	AMobaGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AMobaGameMode>() : nullptr;
+	const bool bLate = bAwaitingLoadout || (GM && GM->IsMatchUnlocked());
+	if (!bLate)
+	{
+		return;
+	}
+	if (NewHero == 0 || NewHero == 1)
+	{
+		HeroIndex = NewHero;
+	}
+	if (NewTeam == 1 || NewTeam == 2)
+	{
+		TeamID = NewTeam;
+	}
+	bAwaitingLoadout = false;
+	if (GM)
+	{
+		GM->SpawnLateJoiner(OwnerController);
+	}
+}
+
+void AMobaPlayerState::ServerStartMatchFromLobby_Implementation()
+{
+	if (!HasAuthority() || !bLobbyLeader)
+	{
+		return; // second joiner's Start Game is hidden, but don't trust the client anyway
+	}
+	if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
+	{
+		GI->AuthorityStartMatchFromLobby();
+	}
 }
 
 void AMobaPlayerState::ServerNotifyMapLoaded_Implementation()
@@ -68,7 +135,7 @@ void AMobaPlayerState::MarkMapLoaded()
 	bMapLoaded = true;
 	if (UWorld* World = GetWorld())
 	{
-		if (AAMobaGameMode* GM = World->GetAuthGameMode<AAMobaGameMode>())
+		if (AMobaGameMode* GM = World->GetAuthGameMode<AMobaGameMode>())
 		{
 			GM->NotifyPlayerLoaded();
 		}
@@ -134,4 +201,24 @@ void AMobaPlayerState::AssignLobbyName()
 
 void AMobaPlayerState::OnRep_TeamId()
 {
+}
+
+void AMobaPlayerState::OnRep_AwaitingLoadout()
+{
+	APlayerController* PC = Cast<APlayerController>(GetOwningController());
+	if (!PC || !PC->IsLocalController())
+	{
+		return;
+	}
+	if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
+	{
+		if (bAwaitingLoadout)
+		{
+			GI->ShowJoinLoadout();
+		}
+		else
+		{
+			GI->FinishJoinLoadout();
+		}
+	}
 }

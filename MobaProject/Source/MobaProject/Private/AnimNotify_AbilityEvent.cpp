@@ -22,10 +22,6 @@ namespace
 		{
 			return FGameplayTag::RequestGameplayTag(FName("Ability.2"), false);
 		}
-		if (Tag == FGameplayTag::RequestGameplayTag(FName("Event.GroundTarget.Blast"), false))
-		{
-			return FGameplayTag::RequestGameplayTag(FName("Ability.3"), false);
-		}
 		return Tag;
 	}
 }

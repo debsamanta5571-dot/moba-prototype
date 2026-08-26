@@ -41,6 +41,7 @@ protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	void RebuildOffers();
+	void RebuildOfferRows();
 	void UpdateOffers();
 
 	UPROPERTY()
@@ -48,9 +49,6 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UTextBlock> GoldText;
-
-	UPROPERTY()
-	TObjectPtr<UTextBlock> StatusText;
 
 	UPROPERTY()
 	TObjectPtr<class UVerticalBox> OfferList;

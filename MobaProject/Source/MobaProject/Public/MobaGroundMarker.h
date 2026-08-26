@@ -5,6 +5,7 @@
 #include "MobaGroundMarker.generated.h"
 
 class AActor;
+class UMaterialInstanceDynamic;
 class UStaticMeshComponent;
 class UWorld;
 
@@ -51,6 +52,10 @@ protected:
 	bool bExpanding = false;
 
 	float AimMaxRange = 1400.f;
+	float ElapsedTime = 0.f;
 	bool bAiming = false;
 	bool bCosmetic = false;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> BlastMid;
 };

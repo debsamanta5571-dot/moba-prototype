@@ -12,7 +12,13 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MobaBaseCharacter.h"
+#include "MobaCombatLibrary.h"
 #include "MobaSfx.h"
+
+namespace
+{
+	constexpr ECollisionChannel ProjectileObject = ECC_GameTraceChannel1;
+}
 
 AMobaProjectile::AMobaProjectile()
 {
@@ -54,12 +60,18 @@ void AMobaProjectile::SetupCollision()
 	Collision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	Collision->SetGenerateOverlapEvents(true);
 	Collision->SetNotifyRigidBodyCollision(true);
-	Collision->SetCollisionObjectType(ECC_WorldDynamic);
+	Collision->SetCollisionObjectType(ProjectileObject);
 	Collision->SetCollisionResponseToAllChannels(ECR_Ignore);
 	Collision->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	Collision->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
 	Collision->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	Collision->SetCollisionResponseToChannel(ProjectileObject, ECR_Ignore);
 	Collision->SetCanEverAffectNavigation(false);
+
+	if (Mesh)
+	{
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
 
 	ProjectileMovement->bSweepCollision = true;
 	ProjectileMovement->bShouldBounce = false;
@@ -92,7 +104,7 @@ void AMobaProjectile::InitFlight(
 
 	if (bCosmetic || bHideVisuals)
 	{
-		SetReplicates(false);
+		SetReplicates(false); // otherwise the listen host sees local bolt + replicated bolt
 		SetReplicateMovement(false);
 	}
 	else
@@ -147,13 +159,12 @@ void AMobaProjectile::OnConstruction(const FTransform& Transform)
 
 void AMobaProjectile::ApplyLook()
 {
-	if (Collision)
-	{
-		Collision->SetSphereRadius(FMath::Max(CollisionRadius, 1.f), false);
-	}
-
 	if (!Mesh)
 	{
+		if (Collision)
+		{
+			Collision->SetSphereRadius(FMath::Max(CollisionRadius, 1.f), false);
+		}
 		return;
 	}
 
@@ -170,6 +181,20 @@ void AMobaProjectile::ApplyLook()
 	const float Scale = FMath::Max(VisualScale, 0.1f);
 	Mesh->SetRelativeScale3D(FVector(Scale));
 	Mesh->SetCastShadow(false);
+
+	float HitRadius = CollisionRadius;
+	if (UStaticMesh* Used = Mesh->GetStaticMesh())
+	{
+		const float VisualR = Used->GetBounds().SphereRadius * Mesh->GetRelativeScale3D().GetAbsMax();
+		if (VisualR > 1.f)
+		{
+			HitRadius = VisualR;
+		}
+	}
+	if (Collision)
+	{
+		Collision->SetSphereRadius(FMath::Max(HitRadius, 1.f), false);
+	}
 
 	UMaterialInterface* Base = BoltMaterial;
 	if (!Base)
@@ -207,6 +232,7 @@ void AMobaProjectile::InitHoming(AActor* Target, float Speed, float InDamage, fl
 
 	Collision->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Ignore);
 	Collision->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
+	Collision->SetCollisionResponseToChannel(ProjectileObject, ECR_Ignore);
 	Collision->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	ProjectileMovement->bSweepCollision = false;
 	ProjectileMovement->bIsHomingProjectile = true;
@@ -328,7 +354,7 @@ bool AMobaProjectile::IsNetRelevantFor(
 
 	if (ViewTarget && (ViewTarget == GetOwner() || ViewTarget == GetInstigator()))
 	{
-		return false;
+		return false; // they already spawned a local cosmetic. This does not hide it from the listen host (they're also the server).
 	}
 
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner() ? GetOwner() : GetInstigator());
@@ -429,13 +455,13 @@ void AMobaProjectile::ConsumeAndDestroy(AActor* DamageTarget)
 		{
 			return;
 		}
-		if (AMobaBaseCharacter::ApplyMobaDamage(Target, Damage, Source))
+		if (UMobaCombatLibrary::ApplyMobaDamage(Target, Damage, Source))
 		{
 			Damaged.Add(Target);
-			AMobaBaseCharacter::ApplyMobaEffects(Target, Source, HitEffects, EMobaEffectTarget::HitActor);
+			UMobaCombatLibrary::ApplyMobaEffects(Target, Source, HitEffects, EMobaEffectTarget::HitActor);
 			if (Damaged.Num() == 1)
 			{
-				AMobaBaseCharacter::ApplyMobaEffects(Target, Source, HitEffects, EMobaEffectTarget::Self);
+				UMobaCombatLibrary::ApplyMobaEffects(Target, Source, HitEffects, EMobaEffectTarget::Self);
 			}
 		}
 	};

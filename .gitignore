@@ -42,6 +42,7 @@
 *.xcodeproj
 *.xcworkspace
 *.sln
+*.slnx
 *.suo
 *.opensdf
 *.sdf
@@ -89,3 +90,20 @@ Raw/
 
 # Paragon animation pack (~3.7GB). Keep local; use LFS or Drive if you need to share it.
 MobaProject/Content/ParagonAnims/
+
+# Editor automation / local-only
+MobaProject/Tools/
+MobaProject/.mcp.json
+MobaProject/Content/Developers/
+MobaProject/Packaged/
+*.zip
+
+# Epic template leftovers (do not re-add)
+MobaProject/Content/ThirdPerson/
+MobaProject/Content/Variant_Combat/
+MobaProject/Content/Variant_Platforming/
+MobaProject/Content/Variant_SideScroller/
+MobaProject/Content/__ExternalActors__/ThirdPerson/
+MobaProject/Content/__ExternalActors__/Variant_Combat/
+MobaProject/Content/__ExternalActors__/Variant_Platforming/
+MobaProject/Content/__ExternalActors__/Variant_SideScroller/

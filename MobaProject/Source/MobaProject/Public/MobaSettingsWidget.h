@@ -39,6 +39,12 @@ protected:
 	UFUNCTION()
 	void OnBackClicked();
 
+	UFUNCTION()
+	void OnMenuClicked();
+
+	UFUNCTION()
+	void OnQuitClicked();
+
 	void UpdateVolumeLabel(float Volume);
 	void SetGraphicsQuality(int32 Level);
 	void RefreshGraphicsButtons();
@@ -57,4 +63,10 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UButton> BackButton;
+
+	UPROPERTY()
+	TObjectPtr<UButton> MenuButton;
+
+	UPROPERTY()
+	TObjectPtr<UButton> QuitButton;
 };

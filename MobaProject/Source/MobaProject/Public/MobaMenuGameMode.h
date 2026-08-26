@@ -14,11 +14,13 @@ public:
 
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+	virtual void Logout(AController* Exiting) override;
 
 protected:
 	virtual void BeginPlay() override;
 
 	void AssignLobbyTeam(AController* Player);
+	void EnsureLobbyLeader();
 
 	int32 NextJoinTeam = 1;
 };

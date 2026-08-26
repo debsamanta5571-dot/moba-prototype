@@ -129,9 +129,9 @@ void UMobaInventoryHUD::RebuildList()
 
 	UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Hint"));
 	Hint->SetJustification(ETextJustify::Center);
-	Hint->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.5f, 0.42f, 1.f)));
+	Hint->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 1.f)));
 	Hint->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 11));
-	Hint->SetText(FText::FromString(TEXT("TAB  close")));
+	Hint->SetText(FText::FromString(TEXT("I  close")));
 	if (UVerticalBoxSlot* HintSlot = Root->AddChildToVerticalBox(Hint))
 	{
 		HintSlot->SetPadding(FMargin(0.f, 12.f, 0.f, 0.f));

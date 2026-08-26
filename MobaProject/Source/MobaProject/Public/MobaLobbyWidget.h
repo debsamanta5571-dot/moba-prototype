@@ -16,6 +16,7 @@ class MOBAPROJECT_API UMobaLobbyWidget : public UUserWidget
 
 public:
 	void PlaceInViewport();
+	void SetJoinInProgress(bool bJoin);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -56,6 +57,12 @@ protected:
 	void RefreshTeamButtons();
 	void RefreshHeroButtons();
 	void RefreshPingPanel();
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> TitleText;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> StartLabel;
 
 	UPROPERTY()
 	TObjectPtr<UVerticalBox> PlayerList;
@@ -101,4 +108,5 @@ protected:
 
 	FString LastListSignature;
 	FTimerHandle RefreshTimer;
+	bool bJoinInProgress = false;
 };

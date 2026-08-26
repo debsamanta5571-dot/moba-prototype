@@ -107,6 +107,13 @@ void UMobaLobbyWidget::PlaceInViewport()
 	Refresh();
 }
 
+void UMobaLobbyWidget::SetJoinInProgress(bool bJoin)
+{
+	bJoinInProgress = bJoin;
+	LastListSignature.Reset();
+	Refresh();
+}
+
 TSharedRef<SWidget> UMobaLobbyWidget::RebuildWidget()
 {
 	if (!WidgetTree)
@@ -168,21 +175,11 @@ TSharedRef<SWidget> UMobaLobbyWidget::RebuildWidget()
 		UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Column"));
 		Card->AddChild(Box);
 
-		if (UVerticalBoxSlot* TitleSlot = Box->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("Title"), TEXT("LOBBY"), 32, Gold)))
+		TitleText = MakeLabel(WidgetTree, TEXT("Title"), TEXT("LOBBY"), 32, Gold);
+		if (UVerticalBoxSlot* TitleSlot = Box->AddChildToVerticalBox(TitleText))
 		{
-			TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 18.f));
 			TitleSlot->SetHorizontalAlignment(HAlign_Fill);
-		}
-		if (UVerticalBoxSlot* SubSlot = Box->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("Subtitle"), TEXT("Pick a character and a team, then wait for the host"), 13, Muted)))
-		{
-			SubSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 18.f));
-			SubSlot->SetHorizontalAlignment(HAlign_Fill);
-		}
-
-		if (UVerticalBoxSlot* HintSlot = Box->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("JoinHint"), TEXT("Joiners use this machine's IP  ·  port 7777"), 12, Muted)))
-		{
-			HintSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
-			HintSlot->SetHorizontalAlignment(HAlign_Fill);
 		}
 
 		PlayerList = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PlayerList"));
@@ -324,6 +321,10 @@ TSharedRef<SWidget> UMobaLobbyWidget::RebuildWidget()
 		StatusText->SetVisibility(ESlateVisibility::Collapsed);
 
 		StartButton = MakeColorButton(WidgetTree, TEXT("Start"), TEXT("Start Game"), HostGreen, 52.f, Ink);
+		if (StartButton && StartButton->GetChildrenCount() > 0)
+		{
+			StartLabel = Cast<UTextBlock>(StartButton->GetChildAt(0));
+		}
 		if (UVerticalBoxSlot* StartSlot = Box->AddChildToVerticalBox(StartButton->GetParent()))
 		{
 			StartSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
@@ -405,6 +406,10 @@ void UMobaLobbyWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	Refresh();
+	if (UMobaGameInstance* GI = Cast<UMobaGameInstance>(GetGameInstance()))
+	{
+		GI->RestoreUiPointerIfNeeded();
+	}
 }
 
 void UMobaLobbyWidget::OnTeam1Clicked()
@@ -439,7 +444,14 @@ void UMobaLobbyWidget::OnStartClicked()
 {
 	if (UMobaGameInstance* GI = Cast<UMobaGameInstance>(GetGameInstance()))
 	{
-		GI->StartMatchFromLobby();
+		if (bJoinInProgress || GI->IsJoinLoadout())
+		{
+			GI->ConfirmJoinLoadout();
+		}
+		else
+		{
+			GI->StartMatchFromLobby();
+		}
 	}
 }
 
@@ -550,12 +562,31 @@ void UMobaLobbyWidget::Refresh()
 	UpdatePingLabel();
 
 	UWorld* World = GetWorld();
-	const bool bHost = World && World->GetNetMode() == NM_ListenServer;
+	if (const UMobaGameInstance* GI = Cast<UMobaGameInstance>(GetGameInstance()))
+	{
+		if (GI->IsJoinLoadout())
+		{
+			bJoinInProgress = true;
+		}
+	}
+	bool bLeader = World && World->GetNetMode() == NM_ListenServer;
+	if (const UMobaGameInstance* LeaderGI = Cast<UMobaGameInstance>(GetGameInstance()))
+	{
+		bLeader = LeaderGI->IsLocalLobbyLeader();
+	}
+	if (TitleText)
+	{
+		TitleText->SetText(FText::FromString(bJoinInProgress ? TEXT("JOIN MATCH") : TEXT("LOBBY")));
+	}
+	if (StartLabel)
+	{
+		StartLabel->SetText(FText::FromString(bJoinInProgress ? TEXT("Enter Match") : TEXT("Start Game")));
+	}
 	if (StartButton)
 	{
 		if (UWidget* StartParent = StartButton->GetParent())
 		{
-			StartParent->SetVisibility(bHost ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+			StartParent->SetVisibility((bLeader || bJoinInProgress) ? ESlateVisibility::Visible : ESlateVisibility::Collapsed); // dedicated: first joiner is leader
 		}
 	}
 	if (StatusText)

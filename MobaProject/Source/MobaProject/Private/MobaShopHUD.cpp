@@ -49,7 +49,11 @@ UMobaShopHUD::UMobaShopHUD(const FObjectInitializer& ObjectInitializer)
 void UMobaShopHUD::SetOwnerCharacter(AMobaBaseCharacter* InOwner)
 {
 	OwnerCharacter = InOwner;
-	RebuildOffers();
+	if (WidgetTree && WidgetTree->RootWidget)
+	{
+		RebuildOfferRows();
+	}
+	UpdateOffers();
 }
 
 void UMobaShopHUD::PlaceInViewport()
@@ -117,54 +121,69 @@ TSharedRef<SWidget> UMobaShopHUD::RebuildWidget()
 
 void UMobaShopHUD::RebuildOffers()
 {
-	BuyButtons.Reset();
-	CostTexts.Reset();
-
 	if (!WidgetTree)
 	{
 		WidgetTree = NewObject<UWidgetTree>(this, TEXT("WidgetTree"), RF_Transient);
 	}
 
-	UBorder* Frame = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Frame"));
-	Frame->SetBrushColor(FLinearColor(0.04f, 0.045f, 0.06f, 0.94f));
-	Frame->SetPadding(FMargin(16.f));
-	WidgetTree->RootWidget = Frame;
-
-	UVerticalBox* Root = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Root"));
-	Frame->AddChild(Root);
-
-	UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Title"));
-	Title->SetJustification(ETextJustify::Center);
-	Title->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.82f, 0.28f, 1.f)));
-	Title->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 22));
-	Title->SetText(FText::FromString(TEXT("SHOP")));
-	if (UVerticalBoxSlot* TitleSlot = Root->AddChildToVerticalBox(Title))
+	if (!WidgetTree->RootWidget)
 	{
-		TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+		UBorder* Frame = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Frame"));
+		Frame->SetBrushColor(FLinearColor(0.04f, 0.045f, 0.06f, 0.94f));
+		Frame->SetPadding(FMargin(16.f));
+		WidgetTree->RootWidget = Frame;
+
+		UVerticalBox* Root = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Root"));
+		Frame->AddChild(Root);
+
+		UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Title"));
+		Title->SetJustification(ETextJustify::Center);
+		Title->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.82f, 0.28f, 1.f)));
+		Title->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 22));
+		Title->SetText(FText::FromString(TEXT("SHOP")));
+		if (UVerticalBoxSlot* TitleSlot = Root->AddChildToVerticalBox(Title))
+		{
+			TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+		}
+
+		GoldText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("GoldText"));
+		GoldText->SetJustification(ETextJustify::Center);
+		GoldText->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.82f, 0.28f, 1.f)));
+		GoldText->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 16));
+		GoldText->SetText(FText::FromString(TEXT("Gold  0")));
+		GoldText->SetAutoWrapText(false);
+		if (UVerticalBoxSlot* GoldSlot = Root->AddChildToVerticalBox(GoldText))
+		{
+			GoldSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+		}
+
+		OfferList = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("OfferList"));
+		Root->AddChildToVerticalBox(OfferList);
+
+		UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Hint"));
+		Hint->SetJustification(ETextJustify::Center);
+		Hint->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.57f, 0.6f, 1.f)));
+		Hint->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 11));
+		Hint->SetText(FText::FromString(TEXT("B  close")));
+		if (UVerticalBoxSlot* HintSlot = Root->AddChildToVerticalBox(Hint))
+		{
+			HintSlot->SetPadding(FMargin(0.f, 12.f, 0.f, 0.f));
+		}
 	}
 
-	GoldText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("GoldText"));
-	GoldText->SetJustification(ETextJustify::Center);
-	GoldText->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.82f, 0.28f, 1.f)));
-	GoldText->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 16));
-	GoldText->SetText(FText::FromString(TEXT("Gold 0")));
-	if (UVerticalBoxSlot* GoldSlot = Root->AddChildToVerticalBox(GoldText))
+	RebuildOfferRows();
+}
+
+void UMobaShopHUD::RebuildOfferRows()
+{
+	BuyButtons.Reset();
+	CostTexts.Reset();
+	if (!OfferList || !WidgetTree)
 	{
-		GoldSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+		return;
 	}
 
-	StatusText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StatusText"));
-	StatusText->SetJustification(ETextJustify::Center);
-	StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.74f, 0.78f, 1.f)));
-	StatusText->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 11));
-	StatusText->SetText(FText::FromString(TEXT("In your team's shop, or while dead")));
-	if (UVerticalBoxSlot* StatusSlot = Root->AddChildToVerticalBox(StatusText))
-	{
-		StatusSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
-	}
-
-	OfferList = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("OfferList"));
-	Root->AddChildToVerticalBox(OfferList);
+	OfferList->ClearChildren();
 
 	const TArray<FMobaShopOffer> Offers = OwnerCharacter
 		? OwnerCharacter->GetShopOffers()
@@ -176,11 +195,11 @@ void UMobaShopHUD::RebuildOffers()
 
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(
 			UHorizontalBox::StaticClass(),
-			*FString::Printf(TEXT("Row%d"), i));
+			NAME_None);
 
 		UTextBlock* Name = WidgetTree->ConstructWidget<UTextBlock>(
 			UTextBlock::StaticClass(),
-			*FString::Printf(TEXT("Name%d"), i));
+			NAME_None);
 		Name->SetColorAndOpacity(FSlateColor(FLinearColor(0.92f, 0.93f, 0.9f, 1.f)));
 		Name->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 13));
 		Name->SetText(FText::FromString(FString::Printf(
@@ -195,7 +214,7 @@ void UMobaShopHUD::RebuildOffers()
 
 		UTextBlock* Cost = WidgetTree->ConstructWidget<UTextBlock>(
 			UTextBlock::StaticClass(),
-			*FString::Printf(TEXT("Cost%d"), i));
+			NAME_None);
 		Cost->SetJustification(ETextJustify::Right);
 		Cost->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.82f, 0.28f, 1.f)));
 		Cost->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 13));
@@ -208,7 +227,7 @@ void UMobaShopHUD::RebuildOffers()
 
 		UMobaShopBuyButton* Buy = WidgetTree->ConstructWidget<UMobaShopBuyButton>(
 			UMobaShopBuyButton::StaticClass(),
-			*FString::Printf(TEXT("Buy%d"), i));
+			NAME_None);
 		Buy->OfferIndex = i;
 		Buy->ShopHUD = this;
 		Buy->OnClicked.AddDynamic(Buy, &UMobaShopBuyButton::HandleClicked);
@@ -216,7 +235,7 @@ void UMobaShopHUD::RebuildOffers()
 
 		UTextBlock* BuyLabel = WidgetTree->ConstructWidget<UTextBlock>(
 			UTextBlock::StaticClass(),
-			*FString::Printf(TEXT("BuyLabel%d"), i));
+			NAME_None);
 		BuyLabel->SetJustification(ETextJustify::Center);
 		BuyLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		BuyLabel->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 12));
@@ -225,7 +244,7 @@ void UMobaShopHUD::RebuildOffers()
 
 		USizeBox* BuySize = WidgetTree->ConstructWidget<USizeBox>(
 			USizeBox::StaticClass(),
-			*FString::Printf(TEXT("BuySize%d"), i));
+			NAME_None);
 		BuySize->SetWidthOverride(72.f);
 		BuySize->SetHeightOverride(28.f);
 		BuySize->AddChild(Buy);
@@ -242,16 +261,6 @@ void UMobaShopHUD::RebuildOffers()
 		BuyButtons.Add(Buy);
 		CostTexts.Add(Cost);
 	}
-
-	UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Hint"));
-	Hint->SetJustification(ETextJustify::Center);
-	Hint->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.57f, 0.6f, 1.f)));
-	Hint->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 11));
-	Hint->SetText(FText::FromString(TEXT("B  close")));
-	if (UVerticalBoxSlot* HintSlot = Root->AddChildToVerticalBox(Hint))
-	{
-		HintSlot->SetPadding(FMargin(0.f, 12.f, 0.f, 0.f));
-	}
 }
 
 void UMobaShopHUD::NativeConstruct()
@@ -261,9 +270,12 @@ void UMobaShopHUD::NativeConstruct()
 	{
 		OwnerCharacter = Cast<AMobaBaseCharacter>(GetOwningPlayerPawn());
 	}
-	RebuildOffers();
 	PlaceInViewport();
 	SetShopOpen(false);
+	if (OfferList && OfferList->GetChildrenCount() == 0)
+	{
+		RebuildOfferRows();
+	}
 	UpdateOffers();
 }
 
@@ -278,7 +290,7 @@ void UMobaShopHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 
 void UMobaShopHUD::UpdateOffers()
 {
-	if (!OwnerCharacter || !GoldText || !StatusText)
+	if (!OwnerCharacter || !GoldText)
 	{
 		return;
 	}
@@ -286,19 +298,6 @@ void UMobaShopHUD::UpdateOffers()
 	GoldText->SetText(FText::FromString(FString::Printf(
 		TEXT("Gold  %d"),
 		FMath::RoundToInt(OwnerCharacter->GetGold()))));
-
-	const bool bCanUse = OwnerCharacter->CanUseShop();
-	if (bCanUse)
-	{
-		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.35f, 0.82f, 0.45f, 1.f)));
-		StatusText->SetText(FText::FromString(
-			OwnerCharacter->IsDead() ? TEXT("Dead. Shop available") : TEXT("In your team's shop")));
-	}
-	else
-	{
-		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.82f, 0.4f, 0.35f, 1.f)));
-		StatusText->SetText(FText::FromString(TEXT("Walk into your shop, or shop while dead")));
-	}
 
 	const TArray<FMobaShopOffer>& Offers = OwnerCharacter->GetShopOffers();
 	for (int32 i = 0; i < BuyButtons.Num(); ++i)
@@ -314,7 +313,9 @@ void UMobaShopHUD::UpdateOffers()
 			: FLinearColor(0.18f, 0.18f, 0.2f, 1.f));
 		if (CostTexts.IsValidIndex(i) && CostTexts[i])
 		{
-			const bool bAfford = OwnerCharacter->GetGold() + 0.01f >= Offers[i].Cost;
+			const float Cost = OwnerCharacter->GetShopOfferCost(i);
+			CostTexts[i]->SetText(FText::FromString(FString::Printf(TEXT("%.0f"), Cost)));
+			const bool bAfford = OwnerCharacter->GetGold() + 0.01f >= Cost;
 			CostTexts[i]->SetColorAndOpacity(FSlateColor(bAfford
 				? FLinearColor(0.95f, 0.82f, 0.28f, 1.f)
 				: FLinearColor(0.82f, 0.32f, 0.28f, 1.f)));

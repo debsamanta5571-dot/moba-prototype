@@ -23,6 +23,7 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	UFUNCTION()
 	void OnHostClicked();
@@ -36,6 +37,9 @@ protected:
 	UFUNCTION()
 	void OnSettingsClicked();
 
+	UFUNCTION()
+	void OnQuitClicked();
+
 	UPROPERTY()
 	TObjectPtr<UButton> HostButton;
 
@@ -44,6 +48,9 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UButton> SettingsButton;
+
+	UPROPERTY()
+	TObjectPtr<UButton> QuitButton;
 
 	UPROPERTY()
 	TObjectPtr<UEditableTextBox> AddressBox;

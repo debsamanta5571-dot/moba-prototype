@@ -7,6 +7,7 @@ public class MobaProject : ModuleRules
 	public MobaProject(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		bUseUnity = false;
 	
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
@@ -24,7 +25,11 @@ public class MobaProject : ModuleRules
 			"AIModule"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "MoviePlayer", "Sockets" });
+		PrivateDependencyModuleNames.Add("Sockets");
+		if (Target.Type != TargetType.Server)
+		{
+			PrivateDependencyModuleNames.Add("MoviePlayer");
+		}
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

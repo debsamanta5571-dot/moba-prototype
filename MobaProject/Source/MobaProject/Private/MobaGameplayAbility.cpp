@@ -1,6 +1,10 @@
 #include "MobaGameplayAbility.h"
 #include "AbilitySystemComponent.h"
+#include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
+#include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
+#include "Animation/AnimMontage.h"
 #include "MobaBaseCharacter.h"
+#include "MobaCombatLibrary.h"
 #include "MobaTower.h"
 
 UMobaGameplayAbility::UMobaGameplayAbility()
@@ -10,6 +14,181 @@ UMobaGameplayAbility::UMobaGameplayAbility()
 	bRetriggerInstancedAbility = false;
 	ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(FName("State.Dead"), false));
 	ActivationBlockedTags.AddTag(FGameplayTag::RequestGameplayTag(FName("State.Stunned"), false));
+	// GAS input triggers fire from InputID. We bind Enhanced Input ourselves, so leave this empty.
+	AbilityTriggers.Reset();
+}
+
+void UMobaGameplayAbility::PostInitProperties()
+{
+	Super::PostInitProperties();
+	AbilityTriggers.Reset();
+}
+
+void UMobaGameplayAbility::PostLoad()
+{
+	Super::PostLoad();
+	AbilityTriggers.Reset();
+}
+
+void UMobaGameplayAbility::ActivateAbility(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayAbilityActivationInfo ActivationInfo,
+	const FGameplayEventData* TriggerEventData)
+{
+	// Do not Super: empty BP ActivateAbility graphs set bHasBlueprintActivate and end the ability.
+
+	bCastNotifyFired = false;
+	bCastMontageDone = false;
+	bPlantedThisCast = false;
+
+	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
+	if (!Character || !PrepareCast(Character, TriggerEventData))
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
+	if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
+	ApplyMobaCooldown();
+	if (bPlayCastSfxOnStart)
+	{
+		PlayCastSfx();
+	}
+	if (bPlantOnCast)
+	{
+		Character->BeginPlantedAbility(GetPlantDuration());
+		bPlantedThisCast = true;
+	}
+
+	OnCastStarted(Character);
+	StartCastMontage();
+}
+
+// Montage wait + slot notify. No montage → fire the notify immediately so hits still go out.
+
+void UMobaGameplayAbility::EndAbility(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayAbilityActivationInfo ActivationInfo,
+	bool bReplicateEndAbility,
+	bool bWasCancelled)
+{
+	EndCastPlant();
+	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
+}
+
+bool UMobaGameplayAbility::PrepareCast(AMobaBaseCharacter* Character, const FGameplayEventData* TriggerEventData)
+{
+	return Character != nullptr;
+}
+
+void UMobaGameplayAbility::OnCastStarted(AMobaBaseCharacter* Character)
+{
+}
+
+void UMobaGameplayAbility::OnCastNotify(FGameplayEventData Payload)
+{
+}
+
+void UMobaGameplayAbility::OnCastMontageDone()
+{
+}
+
+void UMobaGameplayAbility::AdoptLegacyMontage(UAnimMontage* Legacy)
+{
+	if (!CastMontage && Legacy)
+	{
+		CastMontage = Legacy;
+	}
+}
+
+void UMobaGameplayAbility::StartCastMontage()
+{
+	AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo());
+	UAnimMontage* Montage = GetCastMontage();
+
+	const FGameplayTag NotifyTag = ResolveNotifyTag(Character);
+	if (NotifyTag.IsValid())
+	{
+		UAbilityTask_WaitGameplayEvent* WaitNotify = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(
+			this,
+			NotifyTag,
+			nullptr,
+			true);
+		WaitNotify->EventReceived.AddDynamic(this, &UMobaGameplayAbility::HandleCastNotify);
+		WaitNotify->ReadyForActivation();
+	}
+
+	if (Montage)
+	{
+		// Listen host plays the montage twice (local + replicated). BlendOut/Interrupted still go through here, so we gate with bCastMontageDone.
+		UAbilityTask_PlayMontageAndWait* PlayMontage = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
+			this,
+			NAME_None,
+			Montage,
+			1.f,
+			NAME_None,
+			true,
+			0.f);
+		PlayMontage->OnCompleted.AddDynamic(this, &UMobaGameplayAbility::HandleCastMontageDone);
+		PlayMontage->OnBlendOut.AddDynamic(this, &UMobaGameplayAbility::HandleCastMontageDone);
+		PlayMontage->OnInterrupted.AddDynamic(this, &UMobaGameplayAbility::HandleCastMontageDone);
+		PlayMontage->OnCancelled.AddDynamic(this, &UMobaGameplayAbility::HandleCastMontageDone);
+		PlayMontage->ReadyForActivation();
+		return;
+	}
+
+	// Instant abilities (no anim) still need the same notify/end path.
+	HandleCastNotify(FGameplayEventData());
+	HandleCastMontageDone();
+}
+
+void UMobaGameplayAbility::HandleCastNotify(FGameplayEventData Payload)
+{
+	if (bCastNotifyFired)
+	{
+		return;
+	}
+	bCastNotifyFired = true;
+	OnCastNotify(Payload);
+}
+
+void UMobaGameplayAbility::HandleCastMontageDone()
+{
+	if (bCastMontageDone)
+	{
+		return;
+	}
+	bCastMontageDone = true;
+	if (!bCastNotifyFired)
+	{
+		// Montage ended without the slot notify. Still apply the hit so a missing notify doesn't eat the cast.
+		HandleCastNotify(FGameplayEventData());
+	}
+	OnCastMontageDone();
+	if (bEndOnMontage)
+	{
+		EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+	}
+}
+
+void UMobaGameplayAbility::EndCastPlant()
+{
+	if (!bPlantedThisCast)
+	{
+		return;
+	}
+	bPlantedThisCast = false;
+	if (AMobaBaseCharacter* Character = Cast<AMobaBaseCharacter>(GetAvatarActorFromActorInfo()))
+	{
+		Character->EndPlantedAbility();
+	}
 }
 
 bool UMobaGameplayAbility::CanActivateAbility(
@@ -26,6 +205,7 @@ bool UMobaGameplayAbility::CanActivateAbility(
 
 	if (ActorInfo && ActorInfo->AbilitySystemComponent.IsValid())
 	{
+		// Don't check a timer on `this`. CanActivate runs on the CDO, which has no world.
 		const FGameplayTag ActiveCooldown = ResolveCooldownTag(ActorInfo->AvatarActor.Get());
 		if (ActiveCooldown.IsValid() && ActorInfo->AbilitySystemComponent->HasMatchingGameplayTag(ActiveCooldown))
 		{
@@ -62,16 +242,17 @@ bool UMobaGameplayAbility::ApplyAbilityHit(AActor* Target, float InDamage, bool 
 	}
 
 	AActor* Source = GetAvatarActorFromActorInfo();
-	const bool bHit = AMobaBaseCharacter::ApplyMobaDamage(Target, InDamage, Source);
+	const bool bHit = UMobaCombatLibrary::ApplyMobaDamage(Target, InDamage, Source);
 	if (!bHit)
 	{
 		return false;
 	}
 
-	AMobaBaseCharacter::ApplyMobaEffects(Target, Source, Effects, EMobaEffectTarget::HitActor);
+	UMobaCombatLibrary::ApplyMobaEffects(Target, Source, Effects, EMobaEffectTarget::HitActor);
 	if (bApplySelfEffects)
 	{
-		AMobaBaseCharacter::ApplyMobaEffects(Target, Source, Effects, EMobaEffectTarget::Self);
+		// Multi-hit abilities pass true only on the first target so lifesteal doesn't stack.
+		UMobaCombatLibrary::ApplyMobaEffects(Target, Source, Effects, EMobaEffectTarget::Self);
 	}
 	return true;
 }
@@ -149,10 +330,6 @@ FGameplayTag UMobaGameplayAbility::ResolveCooldownTag(const AActor* Avatar) cons
 
 FGameplayTag UMobaGameplayAbility::ResolveNotifyTag(const AActor* Avatar) const
 {
-	if (AnimNotifyTag.IsValid())
-	{
-		return AnimNotifyTag;
-	}
 	return ResolveCooldownTag(Avatar);
 }
 
@@ -167,6 +344,7 @@ void UMobaGameplayAbility::ApplyMobaCooldown() const
 	Character->StartCooldown(ResolveCooldownTag(Character), Cooldown);
 	if (HasAuthority(&CurrentActivationInfo))
 	{
+		// Energy is a server number. Predicting spend here rubber-bands the bar under lag.
 		Character->SpendEnergy(EnergyCost);
 	}
 }

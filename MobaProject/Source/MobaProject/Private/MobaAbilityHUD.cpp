@@ -244,6 +244,17 @@ void UMobaAbilityHUD::RebuildSlots()
 		RowSlot->SetHorizontalAlignment(HAlign_Right);
 	}
 
+	UTextBlock* KeysHint = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("KeysHint"));
+	KeysHint->SetJustification(ETextJustify::Right);
+	KeysHint->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 1.f)));
+	KeysHint->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 12));
+	KeysHint->SetText(FText::FromString(TEXT("TAB  abilities    I  items")));
+	if (UVerticalBoxSlot* KeysSlot = HudStack->AddChildToVerticalBox(KeysHint))
+	{
+		KeysSlot->SetPadding(FMargin(0.f, 10.f, 0.f, 0.f));
+		KeysSlot->SetHorizontalAlignment(HAlign_Right);
+	}
+
 	FillAbilityIcons();
 }
 

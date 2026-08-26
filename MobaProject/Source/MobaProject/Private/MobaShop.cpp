@@ -11,7 +11,7 @@ AMobaShop::AMobaShop()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
-	bAlwaysRelevant = true;
+	bAlwaysRelevant = true; // team id has to reach people who aren't standing in the fountain
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -42,6 +42,7 @@ bool AMobaShop::ContainsPawn(const APawn* Pawn) const
 		return false;
 	}
 
+	// Overlap events miss if the pawn spawned already inside. We do a capsule vs capsule ourselves.
 	FVector HeroCenter = Pawn->GetActorLocation();
 	float HeroRadius = 42.f;
 	float HeroHalfHeight = 96.f;

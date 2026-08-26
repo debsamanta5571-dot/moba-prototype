@@ -9,6 +9,7 @@
 #include "EngineUtils.h"
 #include "MobaAttributeSet.h"
 #include "MobaBaseCharacter.h"
+#include "MobaCombatLibrary.h"
 #include "MobaHealthWidget.h"
 #include "MobaMinion.h"
 #include "MobaProjectile.h"
@@ -227,7 +228,7 @@ void AMobaTower::Fire()
 		return;
 	}
 
-	AActor* Target = FindClosestEnemy();
+	AActor* Target = ChooseFireTarget();
 	if (!Target || !ProjectileClass || !GetWorld())
 	{
 		return;
@@ -265,6 +266,37 @@ void AMobaTower::MulticastFireSfx_Implementation()
 	UMobaSfx::Play(this, FireSound, EMobaSfx::TowerFire, Loc);
 }
 
+bool AMobaTower::IsValidEnemyInRange(const AActor* Other) const
+{
+	if (!IsValid(Other) || Other == this || bDead)
+	{
+		return false;
+	}
+	if (!MobaIsEnemy(this, Other))
+	{
+		return false;
+	}
+	float Health = 0.f;
+	if (const AMobaBaseCharacter* Hero = Cast<AMobaBaseCharacter>(Other))
+	{
+		Health = Hero->GetHealth();
+	}
+	else if (const AMobaMinion* Minion = Cast<AMobaMinion>(Other))
+	{
+		Health = Minion->GetHealth();
+	}
+	else
+	{
+		return false;
+	}
+	if (Health <= 0.f)
+	{
+		return false;
+	}
+	const float R = FMath::Max(Range, 0.f);
+	return FVector::DistSquared(GetActorLocation(), Other->GetActorLocation()) <= R * R;
+}
+
 AActor* AMobaTower::FindClosestEnemy() const
 {
 	AActor* Best = nullptr;
@@ -273,11 +305,7 @@ AActor* AMobaTower::FindClosestEnemy() const
 
 	auto Consider = [&](AActor* Other)
 	{
-		if (!IsValid(Other) || Other == this)
-		{
-			return;
-		}
-		if (!MobaIsEnemy(this, Other))
+		if (!IsValidEnemyInRange(Other))
 		{
 			return;
 		}
@@ -291,20 +319,59 @@ AActor* AMobaTower::FindClosestEnemy() const
 
 	for (TActorIterator<AMobaBaseCharacter> It(GetWorld()); It; ++It)
 	{
-		if (It->GetHealth() > 0.f)
-		{
-			Consider(*It);
-		}
+		Consider(*It);
 	}
 	for (TActorIterator<AMobaMinion> It(GetWorld()); It; ++It)
 	{
-		if (It->GetHealth() > 0.f)
-		{
-			Consider(*It);
-		}
+		Consider(*It);
 	}
 
 	return Best;
+}
+
+AActor* AMobaTower::ChooseFireTarget()
+{
+	if (IsValidEnemyInRange(CurrentTarget.Get()))
+	{
+		return CurrentTarget.Get();
+	}
+	CurrentTarget = FindClosestEnemy();
+	return CurrentTarget.Get();
+}
+
+void AMobaTower::PullAggro(AActor* Attacker)
+{
+	if (!HasAuthority() || !IsValidEnemyInRange(Attacker))
+	{
+		return;
+	}
+	CurrentTarget = Attacker;
+}
+
+void AMobaTower::NotifyHeroDamagedHero(AMobaBaseCharacter* Attacker, AMobaBaseCharacter* Victim)
+{
+	if (!IsValid(Attacker) || !IsValid(Victim) || Attacker == Victim)
+	{
+		return;
+	}
+	UWorld* World = Attacker->GetWorld();
+	if (!World || !World->GetAuthGameMode())
+	{
+		return;
+	}
+	for (TActorIterator<AMobaTower> It(World); It; ++It)
+	{
+		AMobaTower* Tower = *It;
+		if (!Tower || Tower->bDead)
+		{
+			continue;
+		}
+		if (!MobaIsEnemy(Tower, Attacker) || MobaIsEnemy(Tower, Victim))
+		{
+			continue;
+		}
+		Tower->PullAggro(Attacker);
+	}
 }
 
 void AMobaTower::OnRep_Dead()
@@ -328,6 +395,7 @@ void AMobaTower::HandleDeath()
 		return;
 	}
 	bDead = true;
+	CurrentTarget = nullptr;
 	OnRep_Dead();
 	if (HasAuthority() && GetWorld())
 	{

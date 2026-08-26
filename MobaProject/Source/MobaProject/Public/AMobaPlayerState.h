@@ -26,6 +26,9 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerSetHeroIndex(int32 NewIndex);
 
+	UFUNCTION(Server, Reliable)
+	void ServerConfirmLoadout(int32 NewHero, int32 NewTeam);
+
 	UFUNCTION(Client, Reliable)
 	void ClientShowLoading(const FString& Message);
 
@@ -35,8 +38,15 @@ public:
 	void MarkMapLoaded();
 	bool HasLoadedMap() const { return bMapLoaded; }
 	bool IsMatchUnlocked() const { return bMatchUnlocked; }
+	bool IsAwaitingLoadout() const { return bAwaitingLoadout; }
+	void SetAwaitingLoadout(bool bAwaiting);
+	bool CanEditLoadout() const;
 
 	void AssignLobbyName();
+	bool IsLobbyLeader() const { return bLobbyLeader; }
+
+	UFUNCTION(Server, Reliable)
+	void ServerStartMatchFromLobby();
 
 	UFUNCTION()
 	void OnRep_TeamId();
@@ -44,8 +54,17 @@ public:
 	UFUNCTION()
 	void OnRep_MatchUnlocked();
 
+	UFUNCTION()
+	void OnRep_AwaitingLoadout();
+
 	UPROPERTY(ReplicatedUsing = OnRep_MatchUnlocked)
 	bool bMatchUnlocked = false;
+
+	UPROPERTY(ReplicatedUsing = OnRep_AwaitingLoadout)
+	bool bAwaitingLoadout = false;
+
+	UPROPERTY(Replicated)
+	bool bLobbyLeader = false;
 
 	bool bMapLoaded = false;
 };

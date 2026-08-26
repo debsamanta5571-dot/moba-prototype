@@ -1,8 +1,8 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "5.8",
-	"Category": "",
-	"Description": "",
+	"EngineAssociation": "{F2800350-46B7-DCDC-40E7-109D7852DE68}",
+	"Category": "Games",
+	"Description": "Unreal 5.8 C++ MOBA slice: GAS abilities, listen and dedicated multiplayer, shop, two hero kits.",
 	"Modules": [
 		{
 			"Name": "MobaProject",
@@ -28,10 +28,6 @@
 		},
 		{
 			"Name": "GameplayAbilities",
-			"Enabled": true
-		},
-		{
-			"Name": "PythonScriptPlugin",
 			"Enabled": true
 		}
 	]
