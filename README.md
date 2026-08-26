@@ -32,7 +32,7 @@ I haven't fully tested the dedicated server with the client-only build. It shoul
 |---|---|
 | WASD | Move |
 | Mouse | Look and Aim |
-| Ability slots (LMB/Q/LShift/E) |
+| Abilites| LMB, Q, LShift, E| 
 | Shop | B, Can only work in your spawn area or when your dead |
 | Ability Infortmation| TAB|
 | Inventory| I |
