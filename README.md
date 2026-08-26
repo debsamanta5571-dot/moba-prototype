@@ -26,17 +26,18 @@ Unzip the archive and keep that whole folder together (`Engine` + the exe).
 
 I haven't fully tested the dedicated server with the client-only build. It should still work. Standalone host is the path I used.
 
-### Editor
-
-Open `MobaProject/MobaProject.uproject` in a **source-built Unreal 5.8** editor. This project is not set up for the Epic Games Launcher. Play `Moba/Maps/MobaMenu`. Host and Join work the same way as standalone. A second PIE window can join `127.0.0.1:7777`.
+### Controls
 
 | | |
 |---|---|
 | WASD | Move |
-| Mouse | Look |
-| Ability slots (HUD keys, plus Q / E) | Cast. Hold to aim ground abilities, then release to fire |
-| Shop | Open in your fountain, or while dead |
-| Inventory / descriptions / settings | Overlay panels |
+| Mouse | Look and Aim |
+| Ability slots (LMB/Q/LShift/E) |
+| Shop | B, Can only work in your spawn area or when your dead |
+| Ability Infortmation| TAB|
+| Inventory| I |
+| Settings |Backspace or Escape|
+
 
 Ability VFX are `DrawDebug` shapes. That's placeholder presentation, not Niagara.
 
