@@ -29,6 +29,14 @@
 		{
 			"Name": "GameplayAbilities",
 			"Enabled": true
+		},
+		{
+			"Name": "CommonConversation",
+			"Enabled": false
+		},
+		{
+			"Name": "ConversationToolset",
+			"Enabled": false
 		}
 	]
 }
