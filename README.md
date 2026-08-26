@@ -22,9 +22,9 @@ Unzip the archive and keep that whole folder together (`Engine` + the exe).
 
 **Client** is `MobaProjectClient.exe`. This build can join servers but can't host.
 
-**Dedicated server** is `StartServer.bat`. It listens on port **7777** with no local player. The first client to join becomes lobby leader and presses **Start**. Join from the client build.
+**Dedicated server** is `StartServer.bat`. It listens on port **7777** with no local player. Join from the client builds.
 
-I haven't fully tested the dedicated server with the client-only build. It should still work. Standalone host is the path I used.
+I haven't rigorously tested the dedicated server but it should still work
 
 ### Controls
 
