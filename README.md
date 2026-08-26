@@ -30,7 +30,36 @@ Packaged Win64 builds (standalone host, client-only, dedicated `StartServer.bat`
 
 ## Architecture
 
-Hero Blueprints (`BP_Brawler`, `BP_Mage`) fill slots, montages, and numbers. The swing, the bolt, and the buy are C++.
+Unreal is the machine: pawn, Character Movement, replication, widgets, cooking. The *match* is a small set of C++ types that sit on that machine. Blueprint does not decide whether a swing connected.
+
+```
+Session / front-end (host, join, lobby, travel)
+        │
+   GameMode + PlayerState (teams, wait-for-players, loadout)
+        │
+   Hero pawn (GAS avatar, input, death)
+        ├── ability parent + typed children
+        ├── combat library (the only Health write)
+        ├── attribute set + status + shop
+        └── minion AI controller / towers
+```
+
+**What Unreal owns.** Possession, `UCharacterMovementComponent`, actor replication, Enhanced Input, UMG, `ServerTravel`, the three cook targets (game / client / server).
+
+**What the game owns.** Predicted casts, who is an enemy, who may spend gold, when the match unlocks, how a minion picks a target. Those rules are C++. A designer-facing Blueprint fills *data* on top: which four classes sit in the slots, montage, damage, icon.
+
+That split is why a new kit is a subclass, and a new hero is mostly a Blueprint.
+
+### Extending it
+
+Easy, and that is the point of the types:
+
+- **New ability of an existing kind** — duplicate a `BP_GA_*`, change numbers / montage / effects. Trace, projectile, ground AoE, beam, and dash already exist. Put the class in a slot on the hero.
+- **New delivery type** — subclass `UMobaGameplayAbility`, implement `PrepareCast` / `OnCastNotify`. You get prediction, cooldown tags, energy, plant, and montage notify for free. Do not start from `UGameplayAbility`.
+- **New hero** — Blueprint child of `AMobaBaseCharacter`, fill `AbilitySlots`. Slots copy from the parent CDO if the child left them empty. Mesh, hat, shop catalog live on that BP.
+- **New on-hit behavior** — add an `FMobaEffectSpec` (slow, stun, heal, haste). Damage still goes through `UMobaCombatLibrary::ApplyMobaDamage`, which refuses simulated copies and friendly fire.
+
+Not a framework. Two heroes are hardcoded in `GetHeroChoiceCount` / `GetHeroClassAt` (`BP_Brawler`, `BP_Mage`). Teams are 1 and 2. Montage notifies are `Ability.1`–`Ability.4`, so a fifth slot is a tag and a HUD slot, not a one-click. Shop stats are an enum. Those are the seams.
 
 ### Ability core
 
@@ -77,7 +106,7 @@ MobaProject/
   Config/
 ```
 
-Lane AI is `AMobaMinionAIController`. The pawn keeps mesh, GAS, montage, and death. Aggro, leash, and focus-counting live on the controller so `Tick` on the character is not the brain.
+Lane AI is `AMobaMinionAIController`. The pawn keeps mesh, GAS, montage, and death. Aggro, leash, and focus-counting live on the controller so `Tick` on the character is not the brain. Towers pull aggro when a hero hits a hero; otherwise they shoot the closest enemy. The match ends when `AMobaVictoryManager` sees a team tower die.
 
 ## Reasoning
 
