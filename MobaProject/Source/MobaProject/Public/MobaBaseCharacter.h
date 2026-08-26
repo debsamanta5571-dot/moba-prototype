@@ -43,6 +43,7 @@ class UMobaHeroFxComponent;
 class UMobaShopComponent;
 class UMobaBeamComponent;
 class UMobaCosmeticComponent;
+class UStaticMeshComponent;
 class USoundBase;
 class UTexture2D;
 class USpringArmComponent;
@@ -83,6 +84,7 @@ public:
 	UMobaShopComponent* GetShop() const { return Shop; }
 	UMobaBeamComponent* GetBeam() const { return Beam; }
 	UMobaCosmeticComponent* GetCosmetics() const { return Cosmetics; }
+	UStaticMeshComponent* GetHat() const { return Hat; }
 	UWidgetComponent* GetHealthWidget() const { return HealthWidget; }
 	UWidgetComponent* GetCrosshair() const { return Crosshair; }
 	UMobaDescComponent* GetAbilityDesc() const { return AbilityDesc; }
@@ -326,6 +328,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMobaCosmeticComponent> Cosmetics;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStaticMeshComponent> Hat;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputMappingContext> InputMapping;

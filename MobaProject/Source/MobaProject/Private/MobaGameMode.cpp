@@ -113,6 +113,10 @@ void AMobaGameMode::HandleStartingNewPlayer_Implementation(APlayerController* Ne
 	Super::HandleStartingNewPlayer_Implementation(NewPlayer);
 	DestroyOrphanHeroes();
 
+	if (AMobaPlayerState* SpawnedPS = NewPlayer ? NewPlayer->GetPlayerState<AMobaPlayerState>() : nullptr)
+	{
+		SpawnedPS->MarkMapLoaded();
+	}
 	if (AMobaBaseCharacter* Hero = NewPlayer ? Cast<AMobaBaseCharacter>(NewPlayer->GetPawn()) : nullptr)
 	{
 		const AMobaPlayerState* PS = NewPlayer->GetPlayerState<AMobaPlayerState>();
@@ -175,7 +179,15 @@ void AMobaGameMode::TryUnlockMatch(bool bForce)
 			continue;
 		}
 		++Present;
-		if (MobaPS->HasLoadedMap())
+		bool bReady = MobaPS->HasLoadedMap();
+		if (!bReady)
+		{
+			if (const AController* OwnerController = MobaPS->GetOwningController())
+			{
+				bReady = OwnerController->GetPawn() != nullptr;
+			}
+		}
+		if (bReady)
 		{
 			++Loaded;
 		}

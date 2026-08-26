@@ -297,51 +297,78 @@ bool AMobaTower::IsValidEnemyInRange(const AActor* Other) const
 	return FVector::DistSquared(GetActorLocation(), Other->GetActorLocation()) <= R * R;
 }
 
-AActor* AMobaTower::FindClosestEnemy() const
+AActor* AMobaTower::FindClosestMinion() const
 {
 	AActor* Best = nullptr;
 	float BestDistSq = Range * Range;
 	const FVector Here = GetActorLocation();
-
-	auto Consider = [&](AActor* Other)
+	for (TActorIterator<AMobaMinion> It(GetWorld()); It; ++It)
 	{
-		if (!IsValidEnemyInRange(Other))
+		AMobaMinion* Minion = *It;
+		if (!IsValidEnemyInRange(Minion))
 		{
-			return;
+			continue;
 		}
-		const float DistSq = FVector::DistSquared(Here, Other->GetActorLocation());
+		const float DistSq = FVector::DistSquared(Here, Minion->GetActorLocation());
 		if (DistSq < BestDistSq)
 		{
 			BestDistSq = DistSq;
-			Best = Other;
+			Best = Minion;
 		}
-	};
+	}
+	return Best;
+}
 
+AActor* AMobaTower::FindClosestHero() const
+{
+	AActor* Best = nullptr;
+	float BestDistSq = Range * Range;
+	const FVector Here = GetActorLocation();
 	for (TActorIterator<AMobaBaseCharacter> It(GetWorld()); It; ++It)
 	{
-		Consider(*It);
+		AMobaBaseCharacter* Hero = *It;
+		if (!IsValidEnemyInRange(Hero))
+		{
+			continue;
+		}
+		const float DistSq = FVector::DistSquared(Here, Hero->GetActorLocation());
+		if (DistSq < BestDistSq)
+		{
+			BestDistSq = DistSq;
+			Best = Hero;
+		}
 	}
-	for (TActorIterator<AMobaMinion> It(GetWorld()); It; ++It)
-	{
-		Consider(*It);
-	}
-
 	return Best;
 }
 
 AActor* AMobaTower::ChooseFireTarget()
 {
-	if (IsValidEnemyInRange(CurrentTarget.Get()))
+	AActor* Current = CurrentTarget.Get();
+	if (IsValidEnemyInRange(Current) && Cast<AMobaBaseCharacter>(Current))
 	{
-		return CurrentTarget.Get();
+		return Current;
 	}
-	CurrentTarget = FindClosestEnemy();
+	if (AActor* Minion = FindClosestMinion())
+	{
+		CurrentTarget = Minion;
+		return Minion;
+	}
+	if (IsValidEnemyInRange(Current))
+	{
+		return Current;
+	}
+	CurrentTarget = FindClosestHero();
 	return CurrentTarget.Get();
 }
 
 void AMobaTower::PullAggro(AActor* Attacker)
 {
 	if (!HasAuthority() || !IsValidEnemyInRange(Attacker))
+	{
+		return;
+	}
+	AActor* Current = CurrentTarget.Get();
+	if (IsValidEnemyInRange(Current) && Cast<AMobaBaseCharacter>(Current))
 	{
 		return;
 	}

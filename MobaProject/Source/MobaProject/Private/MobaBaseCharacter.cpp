@@ -125,6 +125,13 @@ AMobaBaseCharacter::AMobaBaseCharacter()
 	Shop = CreateDefaultSubobject<UMobaShopComponent>(TEXT("Shop"));
 	Beam = CreateDefaultSubobject<UMobaBeamComponent>(TEXT("Beam"));
 	Cosmetics = CreateDefaultSubobject<UMobaCosmeticComponent>(TEXT("Cosmetics"));
+
+	Hat = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Hat"));
+	Hat->SetupAttachment(GetMesh(), FName(TEXT("Head")));
+	Hat->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Hat->SetCanEverAffectNavigation(false);
+	Hat->SetCastShadow(true);
+	Hat->SetIsReplicated(false);
 }
 
 void AMobaBaseCharacter::PostLoad()

@@ -217,7 +217,7 @@ bool UMobaSessionSubsystem::ShouldShowLobby() const
 		return false;
 	}
 	const UWorld* World = GetWorld();
-	if (!World)
+	if (!World || !IsMenuMap(World->GetMapName()))
 	{
 		return false;
 	}
@@ -404,15 +404,24 @@ void UMobaSessionSubsystem::NotifyLocalMapReady()
 	UGameInstance* GI = GetGameInstance();
 	APlayerController* PC = GI ? GI->GetFirstLocalPlayerController() : nullptr;
 	AMobaPlayerState* PS = PC ? PC->GetPlayerState<AMobaPlayerState>() : nullptr;
+	UWorld* World = GetWorld();
+	if (PS && PS->IsMatchUnlocked())
+	{
+		if (World)
+		{
+			World->GetTimerManager().ClearTimer(MapReadyTimer);
+		}
+		return;
+	}
 	if (!PS)
 	{
-		if (UWorld* World = GetWorld())
+		if (World)
 		{
 			World->GetTimerManager().SetTimer(
 				MapReadyTimer,
 				this,
 				&UMobaSessionSubsystem::NotifyLocalMapReadyRetry,
-				0.1f,
+				0.15f,
 				false);
 		}
 		return;
@@ -420,9 +429,20 @@ void UMobaSessionSubsystem::NotifyLocalMapReady()
 	if (PS->HasAuthority())
 	{
 		PS->MarkMapLoaded();
-		return;
 	}
-	PS->ServerNotifyMapLoaded();
+	else
+	{
+		PS->ServerNotifyMapLoaded();
+	}
+	if (World && !PS->IsMatchUnlocked())
+	{
+		World->GetTimerManager().SetTimer(
+			MapReadyTimer,
+			this,
+			&UMobaSessionSubsystem::NotifyLocalMapReadyRetry,
+			0.25f,
+			false);
+	}
 }
 
 void UMobaSessionSubsystem::NotifyLocalMapReadyRetry()
@@ -432,6 +452,10 @@ void UMobaSessionSubsystem::NotifyLocalMapReadyRetry()
 
 void UMobaSessionSubsystem::OnMatchUnlocked()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(MapReadyTimer);
+	}
 	if (UMobaFrontEndSubsystem* Front = GetFrontEnd())
 	{
 		Front->HideLoadingScreen();
@@ -440,6 +464,7 @@ void UMobaSessionSubsystem::OnMatchUnlocked()
 			Front->ShowJoinLoadout();
 			return;
 		}
+		Front->ReleaseMenuInput();
 	}
 	UWorld* World = GetWorld();
 	if (World && !IsMenuMap(World->GetMapName()))
@@ -455,6 +480,10 @@ bool UMobaSessionSubsystem::ShouldShowJoinLoadout() const
 {
 	const UWorld* World = GetWorld();
 	if (!World || IsMenuMap(World->GetMapName()))
+	{
+		return false;
+	}
+	if (World->GetNetMode() == NM_ListenServer)
 	{
 		return false;
 	}
@@ -913,7 +942,9 @@ void UMobaSessionSubsystem::HandleLoadComplete(const FString& MapName)
 	ClearJoinTimers();
 	if (UWorld* ArenaWorld = GetWorld())
 	{
-		if (!ArenaWorld->GetAuthGameMode<AMobaGameMode>())
+		// Auth GameMode exists only on the server. Clients must still send map-loaded.
+		if (ArenaWorld->GetNetMode() != NM_Client
+			&& !ArenaWorld->GetAuthGameMode<AMobaGameMode>())
 		{
 			if (Front)
 			{
@@ -937,23 +968,25 @@ void UMobaSessionSubsystem::HandleLoadComplete(const FString& MapName)
 	{
 		Front->HideLobby();
 		bool bUnlocked = false;
+		bool bHasPawn = false;
 		if (const UGameInstance* GI = GetGameInstance())
 		{
 			if (const APlayerController* PC = GI->GetFirstLocalPlayerController())
 			{
+				bHasPawn = PC->GetPawn() != nullptr;
 				if (const AMobaPlayerState* PS = PC->GetPlayerState<AMobaPlayerState>())
 				{
 					bUnlocked = PS->IsMatchUnlocked();
 				}
 			}
 		}
-		if (bUnlocked)
+		if (bUnlocked || bHasPawn)
 		{
 			OnMatchUnlocked();
 		}
 		else
 		{
-			Front->ShowLoadingScreen(TEXT("WAITING FOR PLAYERS..."), false);
+			Front->ShowLoadingScreen(TEXT("WAITING FOR PLAYERS..."), false, false);
 		}
 	}
 	ApplySimulatedPing();

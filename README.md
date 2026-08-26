@@ -48,7 +48,7 @@ I haven't rigorously tested the dedicated server but it should still work.
 - Health and energy regen in spawn
 - Status effects: slow, stun, haste, and heal
 - Respawn after death
-- Tower aggro when a hero hits a hero
+- Towers prefer minions, then stick on a hero they are already shooting
 
 ## Architecture
 
@@ -72,7 +72,7 @@ The game owns predicted casts, who counts as an enemy, who may spend gold, when 
 
 A new kit is a subclass, and a new hero is mostly a Blueprint.
 
-Lane AI is `AMobaMinionAIController`. The pawn keeps mesh, GAS, montage, and death. Aggro, leash, and focus-counting live on the controller, so `Tick` on the character isn't the brain. Towers pull aggro if a hero hits another hero; otherwise they shoot the closest enemy. The match ends when `AMobaVictoryManager` sees a team tower die.
+Lane AI is `AMobaMinionAIController`. The pawn keeps mesh, GAS, montage, and death. Aggro, leash, and focus-counting live on the controller, so `Tick` on the character isn't the brain. Towers shoot minions first if any are in range. If they are already targeting a hero they keep that target; hitting an allied hero still pulls aggro. The match ends when `AMobaVictoryManager` sees a team tower die.
 
 ### Extending it
 

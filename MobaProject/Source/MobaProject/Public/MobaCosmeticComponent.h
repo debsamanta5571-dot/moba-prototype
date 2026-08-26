@@ -6,7 +6,7 @@
 
 class AMobaBaseCharacter;
 
-// Hats. Construction Script KeepWorld is wrong on SimulatedProxy (Head is still at the feet).
+// Strips leftover BP KeepWorld hats. Place the C++ Hat mesh in the hero Blueprint.
 UCLASS(ClassGroup = (Moba), meta = (BlueprintSpawnableComponent))
 class MOBAPROJECT_API UMobaCosmeticComponent : public UActorComponent
 {
@@ -19,9 +19,6 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	AMobaBaseCharacter* GetHero() const;
-
-	bool bHatAttached = false;
 };

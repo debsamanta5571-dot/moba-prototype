@@ -305,7 +305,7 @@ void UMobaFrontEndSubsystem::ShowLobby()
 	}
 }
 
-void UMobaFrontEndSubsystem::ShowLoadingScreen(const FString& Message, bool bPrepareMovie)
+void UMobaFrontEndSubsystem::ShowLoadingScreen(const FString& Message, bool bPrepareMovie, bool bCaptureInput)
 {
 	const FString Text = Message.IsEmpty() ? TEXT("LOADING...") : Message;
 	bLoadingScreenQueued = true;
@@ -336,7 +336,10 @@ void UMobaFrontEndSubsystem::ShowLoadingScreen(const FString& Message, bool bPre
 	{
 		SetupMovieLoadingScreen(Text);
 	}
-	ApplyUiPointer(LoadingWidget);
+	if (bCaptureInput)
+	{
+		ApplyUiPointer(LoadingWidget);
+	}
 }
 
 bool UMobaFrontEndSubsystem::IsShowingLoading() const
@@ -353,7 +356,22 @@ void UMobaFrontEndSubsystem::HideLoadingScreen()
 		LoadingWidget->RemoveFromParent();
 	}
 	LoadingWidget = nullptr;
-	RestoreUiPointerIfNeeded();
+
+	UMobaSessionSubsystem* Session = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UMobaSessionSubsystem>()
+		: nullptr;
+	if (Session && Session->ShouldShowLobby())
+	{
+		RestoreUiPointerIfNeeded();
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (World && World->GetMapName().Contains(TEXT("MobaMenu"), ESearchCase::IgnoreCase))
+	{
+		RestoreUiPointerIfNeeded();
+		return;
+	}
+	ReleaseMenuInput();
 }
 
 void UMobaFrontEndSubsystem::HandlePreLoadMap(const FWorldContext& LoadedContext, const FString& MapName)

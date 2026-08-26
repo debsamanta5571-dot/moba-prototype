@@ -46,7 +46,8 @@ protected:
 	void PlaceHealthWidget();
 	void Fire();
 	bool IsValidEnemyInRange(const AActor* Other) const;
-	AActor* FindClosestEnemy() const;
+	AActor* FindClosestMinion() const;
+	AActor* FindClosestHero() const;
 	AActor* ChooseFireTarget();
 	void PullAggro(AActor* Attacker);
 
