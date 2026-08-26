@@ -1,4 +1,5 @@
 # Moba Prototype
+I've always wanted to create a 3d multiplayer moba. I've been experimenting with blueprint on and off over the years. Here is a c++ prototype of a project
 
 ![Gameplay](gameplay.gif)
 
