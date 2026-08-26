@@ -7,7 +7,7 @@
 
 ## Audio
 
-All sounds were from pixabay
+All sounds were from [Pixabay](https://pixabay.com/).
 
 ## Hats
 
