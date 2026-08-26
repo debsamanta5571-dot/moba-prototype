@@ -16,7 +16,7 @@ Two heroes, one lane, a shop, minions, and towers. You pick a side, spend gold, 
 - [Client](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Client-Win64.zip)
 - [Dedicated server](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Server-Win64.zip)
 
-Unzip the archive and keep that whole folder together (`Engine` + the exe).
+Unzip the archive and run the exe you want. For dedicated server use the .bat
 
 **Standalone** is `MobaProject.exe`. You can play on the same network using Lan or you can use a VPN like Radmin to connect over the internet. 
 
