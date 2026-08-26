@@ -1,6 +1,6 @@
 # Moba Prototype
 
-I've always wanted to make a 3D multiplayer MOBA. I've messed around in blueprint on and off with over a while. This here is a c++ multiplayer prototyp using GAS.
+I've always wanted to make a 3D multiplayer MOBA. I've messed around in blueprint on and off with over a while. This here is a c++ multiplayer prototype using GAS.
 
 ## Preview
 
