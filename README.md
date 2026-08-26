@@ -58,8 +58,9 @@ Easy, and that is the point of the types:
 - **New delivery type** — subclass `UMobaGameplayAbility`, implement `PrepareCast` / `OnCastNotify`. You get prediction, cooldown tags, energy, plant, and montage notify for free. Do not start from `UGameplayAbility`.
 - **New hero** — Blueprint child of `AMobaBaseCharacter`, fill `AbilitySlots`. Slots copy from the parent CDO if the child left them empty. Mesh, hat, shop catalog live on that BP.
 - **New on-hit behavior** — add an `FMobaEffectSpec` (slow, stun, heal, haste). Damage still goes through `UMobaCombatLibrary::ApplyMobaDamage`, which refuses simulated copies and friendly fire.
+- **New persistent stat** — add a replicated field on `UMobaAttributeSet`, init it on the hero CDO, then either read it in the combat library (like damage / resist) or add an `EMobaShopStat` case so the shop can buy it. Temporary CC is not an attribute; it is `UMobaStatusComponent`.
 
-Not a framework. Two heroes are hardcoded in `GetHeroChoiceCount` / `GetHeroClassAt` (`BP_Brawler`, `BP_Mage`). Teams are 1 and 2. Montage notifies are `Ability.1`–`Ability.4`, so a fifth slot is a tag and a HUD slot, not a one-click. Shop stats are an enum. Those are the seams.
+Not a framework. Two heroes are hardcoded in `GetHeroChoiceCount` / `GetHeroClassAt` (`BP_Brawler`, `BP_Mage`). Teams are 1 and 2. Montage notifies are `Ability.1`–`Ability.4`, so a fifth slot is a tag and a HUD slot, not a one-click. Those are the seams.
 
 ### Ability core
 
@@ -81,13 +82,22 @@ Children are delivery types, not hero names.
 
 `ApplyAbilityHit` goes through `UMobaCombatLibrary::ApplyMobaDamage`. That function returns false unless the **target** has authority, so a simulated copy never writes Health. Friends are ignored (`MobaIsEnemy`). Self-effects (lifesteal) apply on the first successful target only so a multi-hit does not stack them.
 
-### Combat data
+### Attributes and abilities
 
-`UMobaAttributeSet` replicates health, energy, gold, regen, damage modifier, CDR, resist, and move speed. Status (stun / slow / haste) is a component with a multiplicative slow stack. Slow magnitudes over 1 are treated as percent (20 → 20%).
+One `UMobaAttributeSet` on the ASC. Heroes, minions, and towers all use it (`GetFromActor`). Fields replicate with `REPNOTIFY_Always`: health, energy, gold, their regen, damage modifier, CDR, resist, move speed.
 
-Shop is not HUD. `UMobaShopComponent` owns range, catalog, and `ServerBuyOffer`. Repeat buys cost `base * 1.2^n`. You can buy in fountain overlap, or while dead. Repeat CDR/resist caps at 0.8 / 0.9.
+Abilities do not hard-wire those fields except two knobs on the ability CDO: `EnergyCost` and `Cooldown`. The rest of the kit is a raw number (trace damage 35, bolt 25, …). The pipeline is:
 
-Towers hitting minions deal a percent of **max** HP so wave clear stays even as minions level. Last-hit gold uses a kill-credit window on whoever damaged the victim.
+1. **CanActivate** — `HasEnergy(EnergyCost)`. Dead / stunned tags also block.
+2. **Commit** — `StartCooldown` scales duration by `1 - CDR` (CDR clamped to 0.8). `SpendEnergy` runs only on authority so the bar does not rubber-band.
+3. **Hit** — `ApplyMobaDamage(Target, Amount, Instigator)`. Amount is the ability’s Damage. Incoming `*= attacker.DamageModifier`, then `*= (1 - target.DamageResistance)` (resist clamped to 0.9). The HUD ability text multiplies the same way, so the number you read is the number that lands.
+4. **On-hit specs** — `FMobaEffectSpec` on the ability. Heal writes Health (clamped to max). Slow / stun / haste go to `UMobaStatusComponent`, not the set: slows stack multiplicatively (values over 1 are percent, `20` → 20%), stun also sets `State.Stunned` on the ASC and cancels beam / hold.
+
+Shop writes the **same set**. `EMobaShopStat` maps Damage → `DamageModifier`, Health → max+current, Energy → max+current, and so on. Repeat buys cost `base * 1.2^n`. Fountain overlap (or death) is the only place `ServerBuyOffer` runs. Buy +10% damage once and every trace, bolt, slam, and beam tick scales; you do not touch the ability Blueprints.
+
+Minions and towers init a subset (health, damage modifier, resist, gold-on-kill). Towers hitting minions ignore modifier/resist and deal a percent of **max** HP so wave clear stays even as they level. Last-hit gold uses a kill-credit window on whoever damaged the victim.
+
+A new *lasting* number is an attribute. A new *for a few seconds* number is an effect spec. Mixing those is how a shop item and a slow shot both change a fight without two pipelines.
 
 ### Three targets, one module
 
