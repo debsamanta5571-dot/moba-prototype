@@ -99,12 +99,6 @@ Minions and towers init a subset (health, damage modifier, resist, gold-on-kill)
 
 A new *lasting* number is an attribute. A new *for a few seconds* number is an effect spec. Mixing those is how a shop item and a slow shot both change a fight without two pipelines.
 
-### Three targets, one module
-
-`MobaProject.Target.cs` (game), `MobaProjectClient.Target.cs` (client), `MobaProjectServer.Target.cs` (server) all load the same `MobaProject` module. Client cannot listen (`IsRunningClientOnly`). Server skips `MoviePlayer` in the Build.cs. `UMobaSessionSubsystem` hosts, joins, and travels. `UMobaFrontEndSubsystem` owns menu, lobby, loading movie, and settings.
-
-Lobby start stamps `WaitPlayers=N` on the arena URL and adds `?listen` only on a listen-server. Dedicated travel omits listen or the arena waits on a session that is not there. `AMobaGameMode` unlocks when that many player states have `ServerNotifyMapLoaded`, or after 20 seconds if someone DC'd in travel. Late joiners get a loadout, then `SpawnLateJoiner`. Hero and team are cached across travel by player id and name keys (`P{id}`, `N{name}`) because PlayerState objects do not survive the map change.
-
 ### Net feel
 
 Owning client predicts the cast. Simulated proxies start the cooldown bar late by RTT; `UMobaNetLibrary::CompensateCooldown` subtracts one-way ping (half of `PlayerState` ping, clamped to 0.2s) so the bar matches what they pressed. Lobby sliders write `FPacketSimulationSettings` on the client net driver (`PktLagMin` / `PktIncomingLagMin`) without a rebuild.
