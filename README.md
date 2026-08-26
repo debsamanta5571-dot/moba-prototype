@@ -118,16 +118,4 @@ MobaProject/
 
 Lane AI is `AMobaMinionAIController`. The pawn keeps mesh, GAS, montage, and death. Aggro, leash, and focus-counting live on the controller so `Tick` on the character is not the brain. Towers pull aggro when a hero hits a hero; otherwise they shoot the closest enemy. The match ends when `AMobaVictoryManager` sees a team tower die.
 
-## Reasoning
-
-Blueprint was how I started. It is a bad place to keep predicted melee, a listen host, and a dedicated server in the same project. The C++ is there so a second client is a real machine, not a PIE trick I cannot explain.
-
-Unreal still does what it is good at: possessed pawn, Enhanced Input, replication, widgets, cooking three targets. The session code decides whether this process is allowed to listen. Ground slams do not re-trace the camera on the server; the client confirms the point it aimed. Shop gold only moves if you are in range (or dead) and the server agrees.
-
-Hats look like a joke until you are the SimulatedProxy. Construction Script KeepWorld fires while Head is still at the feet, so the hat stores “stay 173 units above the origin.” When the skeleton updates, it floats. The cosmetic component waits until Head is actually on the skull, then converts mesh-space into Head-space. That is the kind of bug I like: ugly, local, and you can walk someone through it.
-
-## Scope
-
-Two heroes, one test arena, debug-draw FX, no matchmaking. Art and audio are a mix of project pieces and third-party SFX; credits are in [CREDITS.md](CREDITS.md). Paragon animation dumps are not in git. Montages under `Content/Moba` are enough to run the slice.
-
-Made with C++ and Unreal 5.8.
+Made with C++ and Unreal 5.8. Credits in [CREDITS.md](CREDITS.md).
