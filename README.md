@@ -134,6 +134,18 @@ Minions and towers initialize a subset: health, damage modifier, resist, gold on
 
 Lasting numbers live on the attribute set. Short effects live on an effect spec. A shop item and a slow shot can both change a fight that way, without two pipelines.
 
+### Effects
+
+The ability CDO has an `Effects` array of `FMobaEffectSpec`. Each row is a type, a target (`HitActor` or `Self`), a magnitude, and a duration. Blueprint fills the rows. C++ applies them. This path does not use `UGameplayEffect`.
+
+A spec never fires on its own. `ApplyAbilityHit` calls `ApplyMobaDamage` first. Only a successful write (authority, enemy, alive) runs the array. Hit specs go to the victim. Self specs go to the caster. Sweeps, waves, and beam ticks pass `bApplySelfEffects` on the first hit only, so a self-heal doesn't scale with how many bodies were in the cone.
+
+Heal writes the attribute set. Slow, stun, and haste go through `UMobaStatusComponent` on heroes and minions. The component replicates the flags, the speed multipliers, and the end times, and it sets loose tags (`State.Stunned`, `State.Slowed`, `State.Hasted`) so activation can refuse a stunned pawn. Stun also cancels `State.Beaming` and a held ground target. Towers have no status component.
+
+Slow is a stack of `(1 - amount)` terms. Values over 1 are treated as percent, so `20` is 20%. Haste overwrites; it doesn't stack. Final walk speed is `base * slow * haste * plant`. Stun ignores that product and disables movement until the timer expires.
+
+Putting a slow on a new bolt is an array entry, not a subclass. A new kind of effect is an `EMobaEffectType` value and a branch in `ApplySpec`. Timed crowd control gets a replicated field and a timer on the status component. A number that should last the match belongs on `UMobaAttributeSet`, and on `EMobaShopStat` if the shop should sell it.
+
 ### Networking
 
 Unreal replicates the pawn, Character Movement, and attributes. Casts use GAS `LocalPredicted`. Custom Server, NetMulticast, and Client RPCs carry what GAS doesn't: an aim point, this-frame WASD, a shop buy, lobby choices, and VFX that must not double-play on the owner.
