@@ -28,28 +28,47 @@ Ability VFX are `DrawDebug` shapes on purpose. Placeholder presentation, not Nia
 
 Packaged Win64 builds (standalone host, client-only, dedicated `StartServer.bat` on port **7777**) are local packages, not in this repo. The client exe cannot host.
 
-## What you are looking at
-
-This is the kind of work I want to keep doing: prototype a feel, put it on the network, then clean up the bugs that only show up with two machines.
-
-**Abilities.** One predicted GAS parent (`UMobaGameplayAbility`) runs the cast: energy, montage, notify, plant-in-place, cooldown on the Ability System Component. Children are types, not hero names — trace (slash / flamestrike), projectile, ground AoE, beam, dash. Dash goes through Character Movement so the SavedMove includes the root motion. Hits write health only on the server. Local bolts are cosmetic.
-
-**Combat loop.** Gold on last hit, kill credit window, shop offers that change stats, ping-shaved cooldown bars so a laggy client’s HUD matches what they felt. Minions aggro, leash, and attack from an AI controller, not from `Tick` on the pawn. Towers chew a percent of minion max HP so the wave still dies as they level.
-
-**Session.** Same binary can be a listen host, a client that is not allowed to host, or a dedicated server. Lobby caches hero and team across `ServerTravel`. The arena waits until the lobby’s player count has loaded (or 20 seconds, so a DC in travel does not hang forever).
-
 ## Architecture
 
-Unreal draws the match. Gameplay lives in C++.
+Hero Blueprints (`BP_Brawler`, `BP_Mage`) fill slots, montages, and numbers. The swing, the bolt, and the buy are C++.
 
-- `UMobaGameplayAbility` — shared predicted cast path. Cooldown is an ASC tag, not a timer on the ability object (`CanActivate` can run on the CDO).
-- `GA_MobaTrace` / `GA_MobaProjectile` / `GA_MobaGroundAoE` / `GA_MobaBeam` / `GA_MobaDash` — the kits.
-- `UMobaSessionSubsystem` — host, join, dedicated travel, lobby cache, simulated ping.
-- `UMobaFrontEndSubsystem` — menu, lobby, loading movie, settings.
-- `UMobaShopComponent` / `UMobaBeamComponent` / `UMobaCosmeticComponent` — economy, live beam, hat attach. The hero pawn stays the GAS avatar.
-- `AMobaMinionAIController` — lane brain. The minion still owns mesh, health, and the attack montage.
+### Ability core
 
-Hero Blueprints (`BP_Brawler`, `BP_Mage`) fill slots, montages, and numbers. The rules of a swing, a bolt, or a buy are not Blueprint graphs.
+`UMobaGameplayAbility` is `InstancedPerActor` and `LocalPredicted`. GAS input triggers are cleared; Enhanced Input on the pawn presses the spec. `ActivateAbility` does not call `Super` — empty Blueprint Activate graphs set `bHasBlueprintActivate` and would end the ability immediately.
+
+Cast path: `PrepareCast` → `CommitAbility` → cooldown tag + server energy spend → optional plant (walk speed) → montage. `UAnimNotify_AbilityEvent` fires `Ability.1`–`Ability.4`. `UAbilityTask_WaitGameplayEvent` catches that tag. If the montage ends with no notify, the hit still goes out so a missing notify does not eat the cast. Listen host plays the montage locally and again from replication; `bCastMontageDone` gates BlendOut/Interrupted so that double play does not double-end.
+
+Cooldown is a loose tag on the **Ability System Component**, not a timer on the ability object. `CanActivateAbility` can run on the CDO, which has no world. `ResolveCooldownTag` maps the class back to the hero slot. CDR scales the duration (clamped 0–0.8). Energy is a server number; predicting spend rubber-bands the bar.
+
+### Ability types
+
+Children are delivery types, not hero names.
+
+- **`UGA_MobaTrace`** — yaw-flattened sphere sweep. Predicted activate plays the swing; only authority writes Health. Looking up does not throw the sweep into the sky.
+- **`UGA_MobaProjectile`** — camera direction, not actor yaw, so orbs can lob. Authority spawns the damaging bolt. The owning client spawns a cosmetic copy. Listen host already has the authority bolt, so it does not spawn a second visual.
+- **`UGA_MobaGroundAoE`** — hold to aim, release to confirm. The client sends `ServerConfirmGroundTarget` with the point it traced. The server does not re-trace the camera. Damage is an expanding wave on the ability instance (`InstancedPerActor` survives `EndAbility`), not a tick on the pawn.
+- **`UGA_MobaBeam`** — `bEndOnMontage` off. Timers tick damage along a smoothed aim. `UMobaBeamComponent` replicates start/dir/range with `COND_SkipOwner`. `State.Beaming` blocks retrigger.
+- **`UGA_MobaDash`** — WASD for that frame is sent with the activate (`bSendMoveDirection`) or the server dashes the wrong way. Motion is `UAbilityTask_ApplyRootMotionConstantForce` through Character Movement so the SavedMove includes it. `SetActorLocation` on the client rubber-bands.
+
+`ApplyAbilityHit` goes through `UMobaCombatLibrary::ApplyMobaDamage`. That function returns false unless the **target** has authority, so a simulated copy never writes Health. Friends are ignored (`MobaIsEnemy`). Self-effects (lifesteal) apply on the first successful target only so a multi-hit does not stack them.
+
+### Combat data
+
+`UMobaAttributeSet` replicates health, energy, gold, regen, damage modifier, CDR, resist, and move speed. Status (stun / slow / haste) is a component with a multiplicative slow stack. Slow magnitudes over 1 are treated as percent (20 → 20%).
+
+Shop is not HUD. `UMobaShopComponent` owns range, catalog, and `ServerBuyOffer`. Repeat buys cost `base * 1.2^n`. You can buy in fountain overlap, or while dead. Repeat CDR/resist caps at 0.8 / 0.9.
+
+Towers hitting minions deal a percent of **max** HP so wave clear stays even as minions level. Last-hit gold uses a kill-credit window on whoever damaged the victim.
+
+### Three targets, one module
+
+`MobaProject.Target.cs` (game), `MobaProjectClient.Target.cs` (client), `MobaProjectServer.Target.cs` (server) all load the same `MobaProject` module. Client cannot listen (`IsRunningClientOnly`). Server skips `MoviePlayer` in the Build.cs. `UMobaSessionSubsystem` hosts, joins, and travels. `UMobaFrontEndSubsystem` owns menu, lobby, loading movie, and settings.
+
+Lobby start stamps `WaitPlayers=N` on the arena URL and adds `?listen` only on a listen-server. Dedicated travel omits listen or the arena waits on a session that is not there. `AMobaGameMode` unlocks when that many player states have `ServerNotifyMapLoaded`, or after 20 seconds if someone DC'd in travel. Late joiners get a loadout, then `SpawnLateJoiner`. Hero and team are cached across travel by player id and name keys (`P{id}`, `N{name}`) because PlayerState objects do not survive the map change.
+
+### Net feel
+
+Owning client predicts the cast. Simulated proxies start the cooldown bar late by RTT; `UMobaNetLibrary::CompensateCooldown` subtracts one-way ping (half of `PlayerState` ping, clamped to 0.2s) so the bar matches what they pressed. Lobby sliders write `FPacketSimulationSettings` on the client net driver (`PktLagMin` / `PktIncomingLagMin`) without a rebuild.
 
 ```
 MobaProject/
@@ -57,6 +76,8 @@ MobaProject/
   Content/Moba/         maps, hero BPs, abilities, art, SFX
   Config/
 ```
+
+Lane AI is `AMobaMinionAIController`. The pawn keeps mesh, GAS, montage, and death. Aggro, leash, and focus-counting live on the controller so `Tick` on the character is not the brain.
 
 ## Reasoning
 
