@@ -448,7 +448,7 @@ void UMobaLobbyWidget::OnStartClicked()
 		{
 			GI->ConfirmJoinLoadout();
 		}
-		else
+		else if (GI->IsLocalLobbyLeader())
 		{
 			GI->StartMatchFromLobby();
 		}

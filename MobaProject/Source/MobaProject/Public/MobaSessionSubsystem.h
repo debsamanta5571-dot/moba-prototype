@@ -72,6 +72,7 @@ protected:
 	void FailJoin(const FString& Message);
 	void AbortJoinConnection();
 	void EnterLobbyFromJoin();
+	void LogDedicatedServerReady();
 
 	UFUNCTION()
 	void DoRestartTravel();

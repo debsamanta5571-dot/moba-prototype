@@ -57,13 +57,16 @@ public:
 	UFUNCTION()
 	void OnRep_AwaitingLoadout();
 
+	UFUNCTION()
+	void OnRep_LobbyLeader();
+
 	UPROPERTY(ReplicatedUsing = OnRep_MatchUnlocked)
 	bool bMatchUnlocked = false;
 
 	UPROPERTY(ReplicatedUsing = OnRep_AwaitingLoadout)
 	bool bAwaitingLoadout = false;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing = OnRep_LobbyLeader)
 	bool bLobbyLeader = false;
 
 	bool bMapLoaded = false;

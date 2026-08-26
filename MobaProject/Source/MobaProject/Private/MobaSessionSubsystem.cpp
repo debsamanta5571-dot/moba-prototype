@@ -16,97 +16,11 @@
 #include "Engine/NetDriver.h"
 #include "HAL/PlatformTime.h"
 #include "Containers/Ticker.h"
-#include "SocketSubsystem.h"
-#include "Sockets.h"
 #include "TimerManager.h"
+#include <stdio.h>
 
 namespace
 {
-	bool IsLoopbackHost(const FString& Host)
-	{
-		return Host.Equals(TEXT("127.0.0.1"))
-			|| Host.Equals(TEXT("localhost"), ESearchCase::IgnoreCase)
-			|| Host.Equals(TEXT("::1"));
-	}
-
-	void ParseJoinHostPort(const FString& Url, FString& OutHost, int32& OutPort)
-	{
-		OutHost = Url;
-		OutPort = 7777;
-		int32 Colon = INDEX_NONE;
-		if (OutHost.FindLastChar(TEXT(':'), Colon) && Colon > 0)
-		{
-			const FString PortStr = OutHost.Mid(Colon + 1);
-			if (PortStr.IsNumeric())
-			{
-				OutPort = FCString::Atoi(*PortStr);
-				OutHost.LeftInline(Colon);
-			}
-		}
-	}
-
-	bool IsLocalUdpPortFree(int32 Port)
-	{
-		ISocketSubsystem* Sockets = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
-		if (!Sockets)
-		{
-			return true;
-		}
-		FSocket* Socket = Sockets->CreateSocket(NAME_DGram, TEXT("MobaJoinProbe"), false);
-		if (!Socket)
-		{
-			return true;
-		}
-		Socket->SetReuseAddr(false);
-		TSharedRef<FInternetAddr> Addr = Sockets->CreateInternetAddr();
-		Addr->SetAnyAddress();
-		Addr->SetPort(Port);
-		const bool bBound = Socket->Bind(*Addr);
-		Sockets->DestroySocket(Socket);
-		return bBound;
-	}
-
-	bool HasListenLobbyWorld()
-	{
-		if (!GEngine)
-		{
-			return false;
-		}
-		for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
-		{
-			if (const UWorld* World = Ctx.World())
-			{
-				if (World->GetNetMode() == NM_ListenServer)
-				{
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	bool HasStandaloneSiblingWorld(const UWorld* Self)
-	{
-		if (!GEngine)
-		{
-			return false;
-		}
-		for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
-		{
-			UWorld* World = Ctx.World();
-			if (!World || World == Self)
-			{
-				continue;
-			}
-			const ENetMode Mode = World->GetNetMode();
-			if (Mode == NM_Standalone || Mode == NM_Client)
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
 	bool WorldHasClientConnection(const UWorld* World)
 	{
 		if (!World || World->GetNetMode() != NM_Client)
@@ -212,7 +126,7 @@ bool UMobaSessionSubsystem::IsInLobbyNet() const
 
 bool UMobaSessionSubsystem::ShouldShowLobby() const
 {
-	if (bJoinAborted || !bLobbySession)
+	if (bJoinAborted)
 	{
 		return false;
 	}
@@ -532,10 +446,14 @@ void UMobaSessionSubsystem::StartMatchFromLobby()
 	}
 	if (World->GetNetMode() == NM_Client)
 	{
+		if (!IsLocalLobbyLeader())
+		{
+			return;
+		}
 		UGameInstance* GI = GetGameInstance();
 		APlayerController* PC = GI ? GI->GetFirstLocalPlayerController() : nullptr;
 		AMobaPlayerState* PS = PC ? PC->GetPlayerState<AMobaPlayerState>() : nullptr;
-		if (PS && PS->IsLobbyLeader())
+		if (PS)
 		{
 			PS->ServerStartMatchFromLobby();
 			if (UMobaFrontEndSubsystem* Front = GetFrontEnd())
@@ -543,6 +461,10 @@ void UMobaSessionSubsystem::StartMatchFromLobby()
 				Front->ShowLoadingScreen(TEXT("LOADING..."));
 			}
 		}
+		return;
+	}
+	if (World->GetNetMode() == NM_DedicatedServer)
+	{
 		return;
 	}
 	AuthorityStartMatchFromLobby();
@@ -824,24 +746,6 @@ void UMobaSessionSubsystem::JoinGame(const FString& Address)
 		return;
 	}
 
-	FString Host;
-	int32 Port = 7777;
-	ParseJoinHostPort(Url, Host, Port);
-	const bool bLoopback = IsLoopbackHost(Host);
-	if (bLoopback && !HasListenLobbyWorld())
-	{
-		if (HasStandaloneSiblingWorld(GetWorld()) || IsLocalUdpPortFree(Port))
-		{
-			JoinErrorMessage = TEXT("No lobby found");
-			if (Front)
-			{
-				Front->HideLoadingScreen();
-				Front->ShowMenu();
-			}
-			return;
-		}
-	}
-
 	ClearJoinTimers();
 	PendingJoinUrl = Url;
 	bJoinAborted = false;
@@ -874,8 +778,58 @@ void UMobaSessionSubsystem::JoinGame(const FString& Address)
 	BeginJoinTravel();
 }
 
+void UMobaSessionSubsystem::LogDedicatedServerReady()
+{
+	if (!IsRunningDedicatedServer())
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	int32 Port = World->URL.Port > 0 ? World->URL.Port : 7777;
+	UNetDriver* Driver = World->GetNetDriver();
+	if (!Driver)
+	{
+		return;
+	}
+	if (Driver->LocalAddr.IsValid())
+	{
+		const int32 Bound = Driver->LocalAddr->GetPort();
+		if (Bound > 0)
+		{
+			Port = Bound;
+		}
+	}
+
+	static int32 LastReadyPort = 0;
+	if (LastReadyPort == Port)
+	{
+		return;
+	}
+	LastReadyPort = Port;
+
+	const FString Line = FString::Printf(TEXT("SERVER READY  listening on port %d"), Port);
+	UE_LOG(LogTemp, Display, TEXT("========================================"));
+	UE_LOG(LogTemp, Display, TEXT("%s"), *Line);
+	UE_LOG(LogTemp, Display, TEXT("Clients can Join %d now."), Port);
+	UE_LOG(LogTemp, Display, TEXT("========================================"));
+	printf("\n========================================\n%s\nClients can Join %d now.\n========================================\n\n",
+		TCHAR_TO_UTF8(*Line),
+		Port);
+	fflush(stdout);
+}
+
 void UMobaSessionSubsystem::HandleLoadComplete(const FString& MapName)
 {
+	if (IsRunningDedicatedServer())
+	{
+		LogDedicatedServerReady();
+		return;
+	}
+
 	UMobaFrontEndSubsystem* Front = GetFrontEnd();
 	if (bJoinAborted)
 	{
@@ -916,22 +870,26 @@ void UMobaSessionSubsystem::HandleLoadComplete(const FString& MapName)
 		}
 
 		UWorld* World = GetWorld();
-		if (World && World->GetNetMode() != NM_ListenServer)
+		const ENetMode Mode = World ? World->GetNetMode() : NM_Standalone;
+		const bool bInNetLobby = Mode == NM_ListenServer
+			|| (Mode == NM_Client && WorldHasClientConnection(World));
+		if (bInNetLobby)
 		{
-			bLobbySession = false;
-		}
-
-		if (Front)
-		{
-			if (ShouldShowLobby())
+			bLobbySession = true;
+			if (Front)
 			{
 				Front->ShowLobby();
+				Front->RestoreUiPointerIfNeeded();
 			}
-			else
+		}
+		else
+		{
+			bLobbySession = false;
+			if (Front)
 			{
 				Front->ShowMenu();
+				Front->RestoreUiPointerIfNeeded();
 			}
-			Front->RestoreUiPointerIfNeeded();
 		}
 		ApplySimulatedPing();
 		EnsurePingTimer();
@@ -1101,13 +1059,13 @@ void UMobaSessionSubsystem::EnterLobbyFromJoin()
 {
 	bAttemptingJoin = false;
 	bJoinAborted = false;
-	bLobbySession = true;
-	if (UWorld* World = GetWorld())
+	ClearJoinTimers();
+	UWorld* World = GetWorld();
+	if (!World || !IsMenuMap(World->GetMapName()))
 	{
-		World->GetTimerManager().ClearTimer(JoinTimeoutTimer);
-		World->GetTimerManager().ClearTimer(JoinPollTimer);
-		World->GetTimerManager().ClearTimer(JoinTravelTimer);
+		return;
 	}
+	bLobbySession = true;
 	if (UMobaFrontEndSubsystem* Front = GetFrontEnd())
 	{
 		Front->HideLoadingScreen();
@@ -1158,7 +1116,15 @@ bool UMobaSessionSubsystem::TickJoinPoll(float DeltaTime)
 	}
 	if (TryFinishJoin())
 	{
-		EnterLobbyFromJoin();
+		if (IsMenuMap(GetWorld() ? GetWorld()->GetMapName() : FString()))
+		{
+			EnterLobbyFromJoin();
+		}
+		else
+		{
+			bAttemptingJoin = false;
+			ClearJoinTimers();
+		}
 		JoinPollTicker.Reset();
 		return false;
 	}
@@ -1179,7 +1145,15 @@ void UMobaSessionSubsystem::PollJoin()
 	}
 	if (TryFinishJoin())
 	{
-		EnterLobbyFromJoin();
+		if (IsMenuMap(GetWorld() ? GetWorld()->GetMapName() : FString()))
+		{
+			EnterLobbyFromJoin();
+		}
+		else
+		{
+			bAttemptingJoin = false;
+			ClearJoinTimers();
+		}
 	}
 }
 

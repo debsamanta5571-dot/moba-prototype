@@ -31,6 +31,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "EnhancedInput",
+			"Enabled": true
+		},
+		{
 			"Name": "CommonConversation",
 			"Enabled": false
 		},

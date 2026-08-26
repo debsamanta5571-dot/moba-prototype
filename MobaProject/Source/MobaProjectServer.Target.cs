@@ -10,5 +10,9 @@ public class MobaProjectServerTarget : TargetRules
 		ExtraModuleNames.AddRange(new string[] { "MobaProject" });
 		DisablePlugins.Add("CommonConversation");
 		DisablePlugins.Add("ConversationToolset");
+		DisablePlugins.Add("AllToolsets");
+		DisablePlugins.Add("PythonScriptPlugin");
+		DisablePlugins.Add("MCPClientToolset");
+		DisablePlugins.Add("ModelContextProtocol");
 	}
 }

@@ -1,7 +1,9 @@
 #include "MobaFrontEndSubsystem.h"
+#include "Camera/CameraActor.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "InputCoreTypes.h"
 #include "MobaGameInstance.h"
@@ -268,6 +270,22 @@ void UMobaFrontEndSubsystem::ApplyLobbyInput()
 	}
 }
 
+void UMobaFrontEndSubsystem::ApplyMenuCamera()
+{
+	UGameInstance* GI = GetGameInstance();
+	APlayerController* PC = GI ? GI->GetFirstLocalPlayerController() : nullptr;
+	UWorld* World = PC ? PC->GetWorld() : GetWorld();
+	if (!PC || !PC->IsLocalController() || !World)
+	{
+		return;
+	}
+	for (TActorIterator<ACameraActor> It(World); It; ++It)
+	{
+		PC->SetViewTarget(*It);
+		break;
+	}
+}
+
 void UMobaFrontEndSubsystem::ShowLobby()
 {
 	HideLoadingScreen();
@@ -275,8 +293,14 @@ void UMobaFrontEndSubsystem::ShowLobby()
 	APlayerController* PC = GI ? GI->GetFirstLocalPlayerController() : nullptr;
 	if (!PC)
 	{
+		if (UWorld* World = GI ? GI->GetWorld() : nullptr)
+		{
+			World->GetTimerManager().SetTimerForNextTick(
+				FTimerDelegate::CreateUObject(this, &UMobaFrontEndSubsystem::ShowLobby));
+		}
 		return;
 	}
+	ApplyMenuCamera();
 
 	if (IsValid(MenuWidget))
 	{
@@ -480,6 +504,7 @@ void UMobaFrontEndSubsystem::ShowMenu()
 	}
 
 	HideLobby();
+	ApplyMenuCamera();
 	if (IsValid(MenuWidget))
 	{
 		MenuWidget->RemoveFromParent();

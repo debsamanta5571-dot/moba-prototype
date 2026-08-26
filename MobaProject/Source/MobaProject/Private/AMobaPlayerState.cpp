@@ -222,3 +222,7 @@ void AMobaPlayerState::OnRep_AwaitingLoadout()
 		}
 	}
 }
+
+void AMobaPlayerState::OnRep_LobbyLeader()
+{
+}

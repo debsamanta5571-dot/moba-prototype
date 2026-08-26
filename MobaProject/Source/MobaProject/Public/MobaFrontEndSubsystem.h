@@ -42,6 +42,7 @@ protected:
 	void ApplyUiPointer(UUserWidget* FocusWidget);
 	void ApplySettingsInput();
 	void ApplyLobbyInput();
+	void ApplyMenuCamera();
 	void SetupMovieLoadingScreen(const FString& Message);
 	void StopLoadingMovie();
 	void HandlePreLoadMap(const FWorldContext& LoadedContext, const FString& MapName);

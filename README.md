@@ -20,9 +20,7 @@ Download the archive and extract the zip.
 
 **Client** is `MobaProjectClient.exe`. This build can join servers but can't host.
 
-**Dedicated server** is `StartServer.bat`. It listens on port **7777** with no local player. Join from the client builds.
-
-I haven't rigorously tested the dedicated server but it should still work.
+**Dedicated server** is `StartServer.bat`. Wait until the window prints **SERVER READY**, then join from a client. It listens on port **7777** with no local player.
 
 ### Controls
 

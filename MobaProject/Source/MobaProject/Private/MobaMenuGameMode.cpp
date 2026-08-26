@@ -37,36 +37,6 @@ void AMobaMenuGameMode::HandleStartingNewPlayer_Implementation(APlayerController
 	}
 	Super::HandleStartingNewPlayer_Implementation(NewPlayer);
 	EnsureLobbyLeader();
-	if (AMobaPlayerState* PS = NewPlayer ? NewPlayer->GetPlayerState<AMobaPlayerState>() : nullptr)
-	{
-		if (!PS->bLobbyLeader)
-		{
-			AGameStateBase* GS = GameState.Get();
-			if (!GS && GetWorld())
-			{
-				GS = GetWorld()->GetGameState();
-			}
-			bool bAnyLeader = false;
-			if (GS)
-			{
-				for (APlayerState* Other : GS->PlayerArray)
-				{
-					if (const AMobaPlayerState* OtherMoba = Cast<AMobaPlayerState>(Other))
-					{
-						if (OtherMoba->bLobbyLeader)
-						{
-							bAnyLeader = true;
-							break;
-						}
-					}
-				}
-			}
-			if (!bAnyLeader)
-			{
-				PS->bLobbyLeader = true;
-			}
-		}
-	}
 }
 
 void AMobaMenuGameMode::AssignLobbyTeam(AController* Player)
@@ -103,40 +73,60 @@ void AMobaMenuGameMode::Logout(AController* Exiting)
 	EnsureLobbyLeader();
 }
 
-// Dedicated server has no host pawn. First real player gets Start Game; next in list if they leave.
+// Listen host is always leader. Dedicated has no host, so the first joiner is.
 void AMobaMenuGameMode::EnsureLobbyLeader()
 {
+	UWorld* World = GetWorld();
 	AGameStateBase* GS = GameState;
 	if (!GS)
 	{
-		GS = GetWorld() ? GetWorld()->GetGameState() : nullptr;
+		GS = World ? World->GetGameState() : nullptr;
 	}
 	if (!GS)
 	{
 		return;
 	}
 
-	AMobaPlayerState* First = nullptr;
-	bool bHasLeader = false;
-	for (APlayerState* PS : GS->PlayerArray)
+	AMobaPlayerState* Leader = nullptr;
+	if (World && World->GetNetMode() == NM_ListenServer)
 	{
-		AMobaPlayerState* MobaPS = Cast<AMobaPlayerState>(PS);
-		if (!MobaPS || MobaPS->IsOnlyASpectator())
+		if (APlayerController* HostPC = World->GetFirstPlayerController())
 		{
-			continue;
-		}
-		if (!First)
-		{
-			First = MobaPS;
-		}
-		if (MobaPS->bLobbyLeader)
-		{
-			bHasLeader = true;
+			if (HostPC->IsLocalController())
+			{
+				Leader = HostPC->GetPlayerState<AMobaPlayerState>();
+			}
 		}
 	}
-	if (!bHasLeader && First)
+	if (!Leader)
 	{
-		First->bLobbyLeader = true;
+		int32 BestId = MAX_int32;
+		for (APlayerState* PS : GS->PlayerArray)
+		{
+			AMobaPlayerState* MobaPS = Cast<AMobaPlayerState>(PS);
+			if (!MobaPS || MobaPS->IsOnlyASpectator())
+			{
+				continue;
+			}
+			const int32 Id = MobaPS->GetPlayerId();
+			if (!Leader || Id < BestId)
+			{
+				Leader = MobaPS;
+				BestId = Id;
+			}
+		}
+	}
+
+	for (APlayerState* PS : GS->PlayerArray)
+	{
+		if (AMobaPlayerState* MobaPS = Cast<AMobaPlayerState>(PS))
+		{
+			const bool bShouldLead = (MobaPS == Leader);
+			if (MobaPS->bLobbyLeader != bShouldLead)
+			{
+				MobaPS->bLobbyLeader = bShouldLead;
+			}
+		}
 	}
 }
 
