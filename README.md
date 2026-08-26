@@ -20,13 +20,11 @@ Unzip the archive and keep that whole folder together (`Engine` + the exe).
 
 **Standalone** is `MobaProject.exe`, and it's the one I play. **Host** starts a listen lobby on port **7777**. Pick **Brawler** or **Mage**, pick a team, then **Start**. A second copy of this build, or the client, can **Join** `127.0.0.1:7777`. From another machine, use the host's LAN IP.
 
-**Client** is `MobaProjectClient.exe`. Host is hidden; this build can't host. Join only, using the same address and port.
+**Client** is `MobaProjectClient.exe`. This build can join servers but can't host.
 
-**Dedicated server** is `StartServer.bat`. It listens on port **7777** with no local player. The first client to join becomes lobby leader and presses **Start**. Join from the client, or from standalone.
+**Dedicated server** is `StartServer.bat`. It listens on port **7777** with no local player. The first client to join becomes lobby leader and presses **Start**. Join from the client build.
 
 I haven't fully tested the dedicated server with the client-only build. It should still work. Standalone host is the path I used.
-
-Windows may ask for firewall permission the first time you host or start the dedicated server. Allow it, otherwise Join can't reach port 7777.
 
 ### Editor
 
