@@ -12,6 +12,8 @@ Two heroes, one lane, a shop, minions, and towers. You pick a side, spend gold, 
 
 ### Packaged (Win64)
 
+Download the archive and extract the zip.
+
 - [Standalone](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Standalone-Win64.zip)
 - [Client](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Client-Win64.zip)
 - [Dedicated server](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Server-Win64.zip)
