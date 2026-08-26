@@ -11,5 +11,7 @@ public class MobaProjectTarget : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.V7;
 
 		ExtraModuleNames.AddRange( new string[] { "MobaProject" } );
+		DisablePlugins.Add("CommonConversation");
+		DisablePlugins.Add("ConversationToolset");
 	}
 }
