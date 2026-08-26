@@ -52,23 +52,7 @@ I haven't rigorously tested the dedicated server but it should still work.
 
 ## Architecture
 
-Unreal covers possession, Character Movement, actor replication, Enhanced Input, UMG, `ServerTravel`, and the three cook targets (game, client, and server). The C++ layer is the match rules: predicted casts, who counts as an enemy, who can spend gold, when the match unlocks, and how minions and towers pick a target. Blueprints supply the data for a kit and a hero: slot classes, montage, damage, icon, mesh, hat, and shop catalog.
-
-```
-Session / front-end (host, join, lobby, travel)
-        │
-   GameMode + PlayerState (teams, wait-for-players, loadout)
-        │
-   Hero pawn (GAS avatar, input, death)
-        ├── ability parent + typed children
-        ├── combat library (the only Health write)
-        ├── attribute set + status + shop
-        └── minion AI controller / towers
-```
-
-Lane AI is `AMobaMinionAIController`. The minion pawn keeps mesh, GAS, montage, and death. Aggro, leash, and focus-counting are on the controller. Towers shoot the closest enemy minion in range. If they are already targeting a hero, they keep that target. Hitting an allied hero still pulls aggro. The match ends when `AMobaVictoryManager` sees a team tower die.
-
-### Extending it
+### Extending the ability system
 
 To add another ability of an existing type, duplicate a `BP_GA_*` and change the numbers, montage, and effects. Trace, projectile, ground AoE, beam, and dash already exist. Assign the class to a slot on the hero.
 
