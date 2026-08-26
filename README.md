@@ -38,6 +38,26 @@ I haven't fully tested the dedicated server with the client-only build. It shoul
 | Inventory| I |
 | Settings |Backspace or Escape|
 
+### Game features
+
+- 2 heroes: Brawler and Mage
+- 2 teams
+- 1 lane
+- Minion waves that walk the lane and fight
+- 2 towers; knock the enemy tower down to win
+- Shop in fountain (also usable while dead): Damage, Energy, CDR, Health, Resist, Move Speed, Gold Regen
+- Repeat buys scale `1.2^n`
+- 4 abilities per hero
+- Melee sweep, skillshot, ground slam, beam, and dash
+- Health, energy, and gold
+- Last-hit gold on minions
+- Fountain regen in spawn
+- Status effects: slow, stun, haste, and heal
+- Respawn after death
+- Tower aggro when a hero hits a hero
+- Predicted multiplayer casts
+- Host LAN / Join (port 7777)
+- Dedicated server
 
 Ability VFX are `DrawDebug` shapes. That's placeholder presentation, not Niagara.
 
