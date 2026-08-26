@@ -12,18 +12,7 @@
 
 ## Audio
 
-Short combat SFX, imported as-is. Filenames preserve the source labels:
-
-| File prefix | Source |
-|---|---|
-| `freesound_community-*` | [Freesound](https://freesound.org/) community |
-| `dragon-studio-*` | Dragon Studio (stock SFX) |
-| `universfield-*` | Universfield (stock SFX) |
-| `keannix-*` | Keannix (stock SFX) |
-| `yodguard-*` | Yodguard (stock SFX) |
-| `biww-*` | stock fire whoosh |
-
-If you redistribute a binary, keep this file and check each original license (Freesound tracks are typically CC; stock sites vary).
+All sounds were from pixabay
 
 ## Hats / icons
 
