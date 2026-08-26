@@ -150,11 +150,5 @@ Montage, slam, fire-ring, ground-blast, and skillshot cosmetics are NetMulticast
 
 Simulated proxies start the cooldown tag late by RTT. `UMobaNetLibrary::CompensateCooldown` subtracts one-way ping (half of `PlayerState` ping, clamped to 0.2s) so the bar matches the press. `CooldownSanity` replicates so a late join still has remaining time. Lobby sliders write `FPacketSimulationSettings` on the client net driver (`PktLagMin` / `PktIncomingLagMin`) without a rebuild.
 
-```
-MobaProject/
-  Source/MobaProject/   C++ gameplay, session, HUD
-  Content/Moba/         maps, hero BPs, abilities, art, SFX
-  Config/
-```
 
 Made with C++ and Unreal 5.8.
