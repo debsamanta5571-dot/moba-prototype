@@ -3,7 +3,7 @@
 
 ## Animations
 
-- Paragon animation pack (Epic). Used locally for some montages; the bulk pack is not shipped in this git repo.
+- [Paragon animations retargeted to Manny](https://www.fab.com/listings/e6de87b1-b755-478d-9228-a9eb89ff4411) by Kingboars on Fab. Original animations by Epic Games.
 
 ## Audio
 
