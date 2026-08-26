@@ -41,8 +41,8 @@ I haven't rigorously tested the dedicated server but it should still work.
 ### Game features
 
 - 2 heroes: Brawler and Mage
-- Minion waves that walk the lane and fight
-- 2 towers, destroythe enemy tower down to win
+- Minion waves that walk and fight
+- 2 towers, destroy the enemy tower to win
 - Shop in the fountain: Damage, Energy, CDR, Health, Resist, Move Speed, Gold Regen
 - 4 unique abilities per hero
 - Melee sweep, skillshot, ground slam, beam, and dash
