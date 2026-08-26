@@ -99,9 +99,25 @@ Minions and towers init a subset (health, damage modifier, resist, gold-on-kill)
 
 A new *lasting* number is an attribute. A new *for a few seconds* number is an effect spec. Mixing those is how a shop item and a slow shot both change a fight without two pipelines.
 
-### Net feel
+### Networking
 
-Owning client predicts the cast. Simulated proxies start the cooldown bar late by RTT; `UMobaNetLibrary::CompensateCooldown` subtracts one-way ping (half of `PlayerState` ping, clamped to 0.2s) so the bar matches what they pressed. Lobby sliders write `FPacketSimulationSettings` on the client net driver (`PktLagMin` / `PktIncomingLagMin`) without a rebuild.
+Unreal replicates the pawn, Character Movement, and attributes. GAS `LocalPredicted` is the cast. Custom `Server` / `NetMulticast` / `Client` RPCs carry what GAS does not: an aim point, this-frame WASD, a shop buy, lobby votes, VFX that must not double-play on the owner.
+
+**Predicted vs authority.** `UMobaGameplayAbility` is `InstancedPerActor` and `LocalPredicted`. The owning client activates immediately — montage, cooldown tag, cosmetic bolt, dash root motion. The server activates the same spec on its own. `UMobaCombatLibrary::ApplyMobaDamage` returns false unless the **target** has authority, so a predicted swing never writes Health. Friends are ignored there too. Energy is spent only when `HasAuthority(&CurrentActivationInfo)` is true; predicting that spend rubber-bands the bar.
+
+**Per ability, on the wire.**
+
+- **Trace** — predicted activate plays the swing. Only the authority runs the sphere sweep. `MulticastFireRingVfx` skips `IsLocallyControlled()`.
+- **Projectile** — `AMobaProjectile` sets `bReplicates = false`. Authority spawns the damaging bolt. A dedicated-server owner is not the host, so that client spawns a cosmetic copy (`InitFlight(..., bCosmetic=true)`). Listen host already has the authority bolt and does not spawn a second visual.
+- **Ground AoE** — hold aims locally. On release the client traces the floor, stores the point, and sends `ServerConfirmGroundTarget(Class, Location)`. The server does not re-trace the camera; it `SetPendingAbilityLocation` and `TryActivateAbilityByClass`. Blast cue (`GroundBlastCueId` + loc/radius/lifetime) replicates with `COND_SkipOwner`.
+- **Dash** — `bSendMoveDirection`. WASD for that frame is written locally and, if the pawn is a client, `ServerSetPendingAbilityDirection` before `TryActivateAbilityByClass`. Without that RPC the server dashes the wrong way. Motion is `UAbilityTask_ApplyRootMotionConstantForce` through Character Movement so the SavedMove includes it.
+- **Beam** — owner and server drive aim locally. Tick damage is authority-only. `UMobaBeamComponent` replicates start/dir/range/radius with `COND_SkipOwner`; simulated proxies follow `bRepBeaming` without fighting the owner's local beam.
+
+**Session, shop, match.** `AMobaPlayerState` Server RPCs set team, hero, loadout, and map-loaded. `ServerStartMatchFromLobby` checks `bLobbyLeader` — the UI hides Start for joiners, but the server does not trust that. Shop `ServerBuyOffer` re-runs `CanBuy` (gold, range, catalog) before it writes the attribute set. `PurchasedOffers` and `bInShopRange` replicate. Victory is `MulticastMatchOver` from `AMobaVictoryManager`. Attributes use `DOREPLIFETIME_CONDITION_NOTIFY` (`REPNOTIFY_Always`). Stun / slow / haste live on `UMobaStatusComponent` and replicate as their own fields.
+
+**Presentation RPCs.** Montage, slam, fire-ring, ground-blast, and skillshot cosmetics are NetMulticast and return early on `IsLocallyControlled()`, so prediction does not play twice. SFX multicast skips authority *and* owner (they already played locally). Damage and gold numbers are Client RPCs on the pawn that dealt, took, or earned them. VFX/SFX are Unreliable; montage, blast, and lobby RPCs are Reliable.
+
+**Cooldown vs ping.** Simulated proxies start the cooldown tag late by RTT. `UMobaNetLibrary::CompensateCooldown` subtracts one-way ping (half of `PlayerState` ping, clamped to 0.2s) so the bar matches the press. `CooldownSanity` replicates so a late join still has remaining time. Lobby sliders write `FPacketSimulationSettings` on the client net driver (`PktLagMin` / `PktIncomingLagMin`) without a rebuild.
 
 ```
 MobaProject/
