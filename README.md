@@ -43,11 +43,11 @@ I haven't rigorously tested the dedicated server but it should still work.
 - 2 heroes: Brawler and Mage
 - Minion waves that walk and fight
 - 2 towers, destroy the enemy tower to win
-- Shop in the fountain: Damage, Energy, CDR, Health, Resist, Move Speed, Gold Regen
+- Shop in spawn: Damage, Energy, CDR, Health, Resist, Move Speed, Gold Regen
 - 4 unique abilities per hero
 - Melee sweep, skillshot, ground slam, beam, and dash
 - Last-hit gold on minions
-- Fountain regen in spawn
+- Health and energy regen in spawn
 - Status effects: slow, stun, haste, and heal
 - Respawn after death
 - Tower aggro when a hero hits a hero
