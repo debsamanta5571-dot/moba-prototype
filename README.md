@@ -1,8 +1,8 @@
 # Moba Prototype
 
-I've always wanted to make a 3D multiplayer MOBA. I spent years poking at it in Blueprint; this is a C++ prototype of that idea, built with friends in mind as the other seats at the table.
+I've always wanted to make a 3D multiplayer MOBA. I spent years poking at it in Blueprint. This is the C++ prototype of that idea, written so I could play it with friends.
 
-Two heroes, one lane, a shop, minions, and towers. You take a side, spend gold, and try to knock the other team's building down. It is a gameplay and netcode slice, not a shipped game.
+Two heroes, one lane, a shop, minions, and towers. You pick a side, spend gold, and try to knock the other team's building down. It's a gameplay and netcode slice, not a shipped game.
 
 ## Preview
 
@@ -12,33 +12,39 @@ Two heroes, one lane, a shop, minions, and towers. You take a side, spend gold, 
 
 ### Packaged (Win64)
 
-Unzip each download and keep that whole folder together (`Engine` + the exe).
+- [Standalone](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Standalone-Win64.zip)
+- [Client](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Client-Win64.zip)
+- [Dedicated server](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Server-Win64.zip)
 
-- [Standalone](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Standalone-Win64.zip) — `MobaProject.exe`. This is the one to play. **Host** starts a listen lobby on port **7777**. Pick **Brawler** or **Mage**, pick a team, then **Start**. A second copy of this build (or the client) **Join**s `127.0.0.1:7777`, or the host's LAN IP from another machine.
-- [Client](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Client-Win64.zip) — `MobaProjectClient.exe`. Host is hidden; this exe cannot listen. **Join** only, same address/port.
-- [Dedicated server](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Server-Win64.zip) — run `StartServer.bat` (port **7777**, no local player). The first client to join is lobby leader and hits **Start**. Join with the client or standalone **Join**.
+Unzip the archive and keep that whole folder together (`Engine` + the exe).
 
-Dedicated server + client-only is untested end-to-end, but it should still work. Standalone host is the path that was played.
+**Standalone** is `MobaProject.exe`, and it's the one I play. **Host** starts a listen lobby on port **7777**. Pick **Brawler** or **Mage**, pick a team, then **Start**. A second copy of this build, or the client, can **Join** `127.0.0.1:7777`. From another machine, use the host's LAN IP.
 
-Windows may prompt for firewall on first Host or dedicated start; allow it so Join can see port 7777.
+**Client** is `MobaProjectClient.exe`. Host is hidden; this build can't host. Join only, using the same address and port.
+
+**Dedicated server** is `StartServer.bat`. It listens on port **7777** with no local player. The first client to join becomes lobby leader and presses **Start**. Join from the client, or from standalone.
+
+I haven't fully tested the dedicated server with the client-only build. It should still work. Standalone host is the path I used.
+
+Windows may ask for firewall permission the first time you host or start the dedicated server. Allow it, otherwise Join can't reach port 7777.
 
 ### Editor
 
-Open `MobaProject/MobaProject.uproject` in a **source-built Unreal 5.8** editor (this project is not wired to the Epic Games Launcher). Play `Moba/Maps/MobaMenu`. Same Host / Join flow as standalone; a second PIE window can Join `127.0.0.1:7777`.
+Open `MobaProject/MobaProject.uproject` in a **source-built Unreal 5.8** editor. This project is not set up for the Epic Games Launcher. Play `Moba/Maps/MobaMenu`. Host and Join work the same way as standalone. A second PIE window can join `127.0.0.1:7777`.
 
 | | |
 |---|---|
 | WASD | Move |
 | Mouse | Look |
-| Ability slots (HUD keys, plus Q / E) | Cast. Hold to aim ground abilities, release to fire |
+| Ability slots (HUD keys, plus Q / E) | Cast. Hold to aim ground abilities, then release to fire |
 | Shop | Open in your fountain, or while dead |
 | Inventory / descriptions / settings | Overlay panels |
 
-Ability VFX are `DrawDebug` shapes on purpose. Placeholder presentation, not Niagara.
+Ability VFX are `DrawDebug` shapes. That's placeholder presentation, not Niagara.
 
 ## Architecture
 
-Unreal is the machine: pawn, Character Movement, replication, widgets, cooking. The *match* is a small set of C++ types that sit on that machine. Blueprint does not decide whether a swing connected.
+Unreal already gives you a pawn, Character Movement, replication, widgets, and cooking. The match rules sit on top of that as a small set of C++ types. Blueprint doesn't decide whether a swing connected.
 
 ```
 Session / front-end (host, join, lobby, travel)
@@ -52,80 +58,87 @@ Session / front-end (host, join, lobby, travel)
         └── minion AI controller / towers
 ```
 
-**What Unreal owns.** Possession, `UCharacterMovementComponent`, actor replication, Enhanced Input, UMG, `ServerTravel`, the three cook targets (game / client / server).
+Unreal owns possession, `UCharacterMovementComponent`, actor replication, Enhanced Input, UMG, `ServerTravel`, and the three cook targets (game, client, and server).
 
-**What the game owns.** Predicted casts, who is an enemy, who may spend gold, when the match unlocks, how a minion picks a target. Those rules are C++. A designer-facing Blueprint fills *data* on top: which four classes sit in the slots, montage, damage, icon.
+The game owns predicted casts, who counts as an enemy, who may spend gold, when the match unlocks, and how a minion picks a target. Those rules are C++. A Blueprint fills in the data: which four ability classes sit in the slots, plus montage, damage, and icon.
 
-That split is why a new kit is a subclass, and a new hero is mostly a Blueprint.
+A new kit is a subclass, and a new hero is mostly a Blueprint.
+
+Lane AI is `AMobaMinionAIController`. The pawn keeps mesh, GAS, montage, and death. Aggro, leash, and focus-counting live on the controller, so `Tick` on the character isn't the brain. Towers pull aggro if a hero hits another hero; otherwise they shoot the closest enemy. The match ends when `AMobaVictoryManager` sees a team tower die.
 
 ### Extending it
 
-Easy, and that is the point of the types:
+You can get a long way on the types that are already there.
 
-- **New ability of an existing kind** — duplicate a `BP_GA_*`, change numbers / montage / effects. Trace, projectile, ground AoE, beam, and dash already exist. Put the class in a slot on the hero.
-- **New delivery type** — subclass `UMobaGameplayAbility`, implement `PrepareCast` / `OnCastNotify`. You get prediction, cooldown tags, energy, plant, and montage notify for free. Do not start from `UGameplayAbility`.
-- **New hero** — Blueprint child of `AMobaBaseCharacter`, fill `AbilitySlots`. Slots copy from the parent CDO if the child left them empty. Mesh, hat, shop catalog live on that BP.
-- **New on-hit behavior** — add an `FMobaEffectSpec` (slow, stun, heal, haste). Damage still goes through `UMobaCombatLibrary::ApplyMobaDamage`, which refuses simulated copies and friendly fire.
-- **New persistent stat** — add a replicated field on `UMobaAttributeSet`, init it on the hero CDO, then either read it in the combat library (like damage / resist) or add an `EMobaShopStat` case so the shop can buy it. Temporary CC is not an attribute; it is `UMobaStatusComponent`.
+To add another ability of a type that already exists, duplicate a `BP_GA_*` and change the numbers, montage, and effects. Trace, projectile, ground AoE, beam, and dash are already there. Put the class in a slot on the hero.
 
-Not a framework. Two heroes are hardcoded in `GetHeroChoiceCount` / `GetHeroClassAt` (`BP_Brawler`, `BP_Mage`). Teams are 1 and 2. Montage notifies are `Ability.1`–`Ability.4`, so a fifth slot is a tag and a HUD slot, not a one-click. Those are the seams.
+For a new delivery type, subclass `UMobaGameplayAbility` and implement `PrepareCast` / `OnCastNotify`. You inherit prediction, cooldown tags, energy, plant, and the montage notify. Don't start from `UGameplayAbility`.
+
+A new hero is a Blueprint child of `AMobaBaseCharacter`. Fill `AbilitySlots`. If the child leaves a slot empty, it copies from the parent CDO. Mesh, hat, and the shop catalog live on that Blueprint.
+
+On-hit behavior is an `FMobaEffectSpec`: slow, stun, heal, and haste. Damage still goes through `UMobaCombatLibrary::ApplyMobaDamage`, which refuses simulated copies and friendly fire.
+
+A lasting stat is a replicated field on `UMobaAttributeSet`. Initialize it on the hero CDO, then either read it in the combat library (damage, resist) or add an `EMobaShopStat` case so the shop can buy it. Crowd control that lasts a few seconds is not an attribute; it goes on `UMobaStatusComponent`.
+
+A few things are still hardcoded. Two heroes are listed in `GetHeroChoiceCount` / `GetHeroClassAt` (`BP_Brawler`, `BP_Mage`). Teams are 1 and 2. Montage notifies are `Ability.1` through `Ability.4`, so a fifth slot means a new tag and a HUD slot.
 
 ### Ability core
 
-`UMobaGameplayAbility` is `InstancedPerActor` and `LocalPredicted`. GAS input triggers are cleared; Enhanced Input on the pawn presses the spec. `ActivateAbility` does not call `Super` — empty Blueprint Activate graphs set `bHasBlueprintActivate` and would end the ability immediately.
+`UMobaGameplayAbility` is `InstancedPerActor` and `LocalPredicted`. GAS input triggers are cleared. Enhanced Input on the pawn presses the spec. `ActivateAbility` does not call `Super`. Empty Blueprint Activate graphs set `bHasBlueprintActivate` and would end the ability immediately.
 
-Cast path: `PrepareCast` → `CommitAbility` → cooldown tag + server energy spend → optional plant (walk speed) → montage. `UAnimNotify_AbilityEvent` fires `Ability.1`–`Ability.4`. `UAbilityTask_WaitGameplayEvent` catches that tag. If the montage ends with no notify, the hit still goes out so a missing notify does not eat the cast. Listen host plays the montage locally and again from replication; `bCastMontageDone` gates BlendOut/Interrupted so that double play does not double-end.
+The cast path is `PrepareCast`, then `CommitAbility`, then a cooldown tag and a server energy spend, then an optional plant (walk speed), then the montage. `UAnimNotify_AbilityEvent` fires `Ability.1` through `Ability.4`. `UAbilityTask_WaitGameplayEvent` waits for that tag. If the montage ends without a notify, the hit still goes out, so a missing notify doesn't eat the cast. A listen host plays the montage locally and again from replication. `bCastMontageDone` gates BlendOut and Interrupted so that double play doesn't double-end.
 
-Cooldown is a loose tag on the **Ability System Component**, not a timer on the ability object. `CanActivateAbility` can run on the CDO, which has no world. `ResolveCooldownTag` maps the class back to the hero slot. CDR scales the duration (clamped 0–0.8). Energy is a server number; predicting spend rubber-bands the bar.
+Cooldown is a loose tag on the Ability System Component, not a timer on the ability object. `CanActivateAbility` can run on the CDO, which has no world. `ResolveCooldownTag` maps the class back to the hero slot. Cooldown reduction scales the duration, clamped to 0–0.8. Energy is a server number. Predicting the spend rubber-bands the bar.
 
 ### Ability types
 
-Children are delivery types, not hero names.
+Each child is a delivery type, not a hero name.
 
-- **`UGA_MobaTrace`** — yaw-flattened sphere sweep. Predicted activate plays the swing; only authority writes Health. Looking up does not throw the sweep into the sky.
-- **`UGA_MobaProjectile`** — camera direction, not actor yaw, so orbs can lob. Authority spawns the damaging bolt. The owning client spawns a cosmetic copy. Listen host already has the authority bolt, so it does not spawn a second visual.
-- **`UGA_MobaGroundAoE`** — hold to aim, release to confirm. The client sends `ServerConfirmGroundTarget` with the point it traced. The server does not re-trace the camera. Damage is an expanding wave on the ability instance (`InstancedPerActor` survives `EndAbility`), not a tick on the pawn.
-- **`UGA_MobaBeam`** — `bEndOnMontage` off. Timers tick damage along a smoothed aim. `UMobaBeamComponent` replicates start/dir/range with `COND_SkipOwner`. `State.Beaming` blocks retrigger.
-- **`UGA_MobaDash`** — WASD for that frame is sent with the activate (`bSendMoveDirection`) or the server dashes the wrong way. Motion is `UAbilityTask_ApplyRootMotionConstantForce` through Character Movement so the SavedMove includes it. `SetActorLocation` on the client rubber-bands.
+`UGA_MobaTrace` is a yaw-flattened sphere sweep. Predicted activate plays the swing. Only authority writes Health. Looking up doesn't throw the sweep into the sky.
 
-`ApplyAbilityHit` goes through `UMobaCombatLibrary::ApplyMobaDamage`. That function returns false unless the **target** has authority, so a simulated copy never writes Health. Friends are ignored (`MobaIsEnemy`). Self-effects (lifesteal) apply on the first successful target only so a multi-hit does not stack them.
+`UGA_MobaProjectile` uses camera direction, not actor yaw, so orbs can lob. Authority spawns the damaging bolt. The owning client, if it isn't also the host, spawns a cosmetic copy. A listen host already has the authority bolt, so it doesn't spawn a second visual. The projectile actor itself doesn't replicate (`bReplicates = false`).
+
+`UGA_MobaGroundAoE` is hold to aim, release to confirm. The client sends `ServerConfirmGroundTarget` with the point it traced. The server doesn't re-trace the camera. Damage is an expanding wave on the ability instance. `InstancedPerActor` is what lets that wave survive `EndAbility`; it isn't a tick on the pawn.
+
+`UGA_MobaBeam` leaves `bEndOnMontage` off. Timers tick damage along a smoothed aim. `UMobaBeamComponent` replicates start, direction, and range with `COND_SkipOwner`. `State.Beaming` blocks retrigger.
+
+`UGA_MobaDash` has to send WASD for that frame with the activate (`bSendMoveDirection`), or the server dashes the wrong way. Motion is `UAbilityTask_ApplyRootMotionConstantForce` through Character Movement, so the SavedMove includes it. `SetActorLocation` on the client rubber-bands.
+
+Hits go through `UMobaCombatLibrary::ApplyMobaDamage`. That function returns false unless the target has authority, so a simulated copy never writes Health. Friends are ignored (`MobaIsEnemy`). Self-effects like lifesteal apply on the first successful target only, so a multi-hit doesn't stack them.
 
 ### Attributes and abilities
 
-One `UMobaAttributeSet` on the ASC. Heroes, minions, and towers all use it (`GetFromActor`). Fields replicate with `REPNOTIFY_Always`: health, energy, gold, their regen, damage modifier, CDR, resist, move speed.
+There's one `UMobaAttributeSet` on the ASC. Heroes, minions, and towers all use it (`GetFromActor`). Fields replicate with `REPNOTIFY_Always`: health, energy, gold, their regen, damage modifier, cooldown reduction, resist, and move speed.
 
-Abilities do not hard-wire those fields except two knobs on the ability CDO: `EnergyCost` and `Cooldown`. The rest of the kit is a raw number (trace damage 35, bolt 25, …). The pipeline is:
+Abilities don't hard-wire those fields except two knobs on the ability CDO, `EnergyCost` and `Cooldown`. The rest of the kit is a raw number: trace damage 35, bolt 25, and so on.
 
-1. **CanActivate** — `HasEnergy(EnergyCost)`. Dead / stunned tags also block.
-2. **Commit** — `StartCooldown` scales duration by `1 - CDR` (CDR clamped to 0.8). `SpendEnergy` runs only on authority so the bar does not rubber-band.
-3. **Hit** — `ApplyMobaDamage(Target, Amount, Instigator)`. Amount is the ability’s Damage. Incoming `*= attacker.DamageModifier`, then `*= (1 - target.DamageResistance)` (resist clamped to 0.9). The HUD ability text multiplies the same way, so the number you read is the number that lands.
-4. **On-hit specs** — `FMobaEffectSpec` on the ability. Heal writes Health (clamped to max). Slow / stun / haste go to `UMobaStatusComponent`, not the set: slows stack multiplicatively (values over 1 are percent, `20` → 20%), stun also sets `State.Stunned` on the ASC and cancels beam / hold.
+**CanActivate** checks `HasEnergy(EnergyCost)`. Dead and stunned tags also block.
 
-Shop writes the **same set**. `EMobaShopStat` maps Damage → `DamageModifier`, Health → max+current, Energy → max+current, and so on. Repeat buys cost `base * 1.2^n`. Fountain overlap (or death) is the only place `ServerBuyOffer` runs. Buy +10% damage once and every trace, bolt, slam, and beam tick scales; you do not touch the ability Blueprints.
+**Commit** calls `StartCooldown`, which scales duration by `1 - CDR` (CDR clamped to 0.8). `SpendEnergy` runs only on authority so the bar doesn't rubber-band.
 
-Minions and towers init a subset (health, damage modifier, resist, gold-on-kill). Towers hitting minions ignore modifier/resist and deal a percent of **max** HP so wave clear stays even as they level. Last-hit gold uses a kill-credit window on whoever damaged the victim.
+**Hit** is `ApplyMobaDamage(Target, Amount, Instigator)`. Amount is the ability's Damage. Incoming is multiplied by the attacker's `DamageModifier`, then by `1 - target.DamageResistance` (resist clamped to 0.9). The HUD ability text multiplies the same way, so the number you read is the number that lands.
 
-A new *lasting* number is an attribute. A new *for a few seconds* number is an effect spec. Mixing those is how a shop item and a slow shot both change a fight without two pipelines.
+**On-hit specs** are `FMobaEffectSpec` on the ability. Heal writes Health, clamped to max. Slow, stun, and haste go to `UMobaStatusComponent`, not the set. Slows stack multiplicatively. Values over 1 are treated as percent, so `20` is 20%. Stun also sets `State.Stunned` on the ASC and cancels beam and hold.
+
+The shop writes the same set. `EMobaShopStat` maps Damage to `DamageModifier`, Health to max and current, Energy to max and current, and so on. Repeat buys cost `base * 1.2^n`. Fountain overlap, or death, is the only place `ServerBuyOffer` runs. Buy +10% damage once, and every trace, bolt, slam, and beam tick scales. You don't touch the ability Blueprints.
+
+Minions and towers initialize a subset: health, damage modifier, resist, gold on kill. When a tower hits a minion, it ignores modifier and resist and deals a percent of max HP, so wave clear stays even as they level. Last-hit gold uses a kill-credit window on whoever damaged the victim.
+
+Lasting numbers live on the attribute set. Short effects live on an effect spec. A shop item and a slow shot can both change a fight that way, without two pipelines.
 
 ### Networking
 
-Unreal replicates the pawn, Character Movement, and attributes. GAS `LocalPredicted` is the cast. Custom `Server` / `NetMulticast` / `Client` RPCs carry what GAS does not: an aim point, this-frame WASD, a shop buy, lobby votes, VFX that must not double-play on the owner.
+Unreal replicates the pawn, Character Movement, and attributes. Casts use GAS `LocalPredicted`. Custom Server, NetMulticast, and Client RPCs carry what GAS doesn't: an aim point, this-frame WASD, a shop buy, lobby choices, and VFX that must not double-play on the owner.
 
-**Predicted vs authority.** `UMobaGameplayAbility` is `InstancedPerActor` and `LocalPredicted`. The owning client activates immediately — montage, cooldown tag, cosmetic bolt, dash root motion. The server activates the same spec on its own. `UMobaCombatLibrary::ApplyMobaDamage` returns false unless the **target** has authority, so a predicted swing never writes Health. Friends are ignored there too. Energy is spent only when `HasAuthority(&CurrentActivationInfo)` is true; predicting that spend rubber-bands the bar.
+The owning client activates immediately: montage, cooldown tag, cosmetic bolt, dash root motion. The server activates the same spec on its own. `ApplyMobaDamage` still requires the target to have authority, so a predicted swing never writes Health. Friends are ignored there too. Energy is spent only when `HasAuthority(&CurrentActivationInfo)` is true. Predicting that spend rubber-bands the bar.
 
-**Per ability, on the wire.**
+A few abilities need an extra RPC. Ground slam sends `ServerConfirmGroundTarget` with the client's floor point; the server stores it and calls `TryActivateAbilityByClass` instead of re-tracing the camera. Dash writes WASD locally and, on a client, calls `ServerSetPendingAbilityDirection` before activate. Beam damage ticks on authority only. Beam start, direction, range, and the ground-blast cue replicate with `COND_SkipOwner`, so simulated proxies can follow without fighting the owner's local presentation.
 
-- **Trace** — predicted activate plays the swing. Only the authority runs the sphere sweep. `MulticastFireRingVfx` skips `IsLocallyControlled()`.
-- **Projectile** — `AMobaProjectile` sets `bReplicates = false`. Authority spawns the damaging bolt. A dedicated-server owner is not the host, so that client spawns a cosmetic copy (`InitFlight(..., bCosmetic=true)`). Listen host already has the authority bolt and does not spawn a second visual.
-- **Ground AoE** — hold aims locally. On release the client traces the floor, stores the point, and sends `ServerConfirmGroundTarget(Class, Location)`. The server does not re-trace the camera; it `SetPendingAbilityLocation` and `TryActivateAbilityByClass`. Blast cue (`GroundBlastCueId` + loc/radius/lifetime) replicates with `COND_SkipOwner`.
-- **Dash** — `bSendMoveDirection`. WASD for that frame is written locally and, if the pawn is a client, `ServerSetPendingAbilityDirection` before `TryActivateAbilityByClass`. Without that RPC the server dashes the wrong way. Motion is `UAbilityTask_ApplyRootMotionConstantForce` through Character Movement so the SavedMove includes it.
-- **Beam** — owner and server drive aim locally. Tick damage is authority-only. `UMobaBeamComponent` replicates start/dir/range/radius with `COND_SkipOwner`; simulated proxies follow `bRepBeaming` without fighting the owner's local beam.
+Lobby traffic is on `AMobaPlayerState`: team, hero, loadout, and map-loaded. `ServerStartMatchFromLobby` checks `bLobbyLeader`. The UI hides Start for joiners, but the server doesn't trust that. Shop `ServerBuyOffer` re-runs `CanBuy` (gold, range, catalog) before it writes the attribute set. `PurchasedOffers` and `bInShopRange` replicate. Victory is `MulticastMatchOver` from `AMobaVictoryManager`. Attributes use `DOREPLIFETIME_CONDITION_NOTIFY` with `REPNOTIFY_Always`. Stun, slow, and haste live on `UMobaStatusComponent` and replicate as their own fields.
 
-**Session, shop, match.** `AMobaPlayerState` Server RPCs set team, hero, loadout, and map-loaded. `ServerStartMatchFromLobby` checks `bLobbyLeader` — the UI hides Start for joiners, but the server does not trust that. Shop `ServerBuyOffer` re-runs `CanBuy` (gold, range, catalog) before it writes the attribute set. `PurchasedOffers` and `bInShopRange` replicate. Victory is `MulticastMatchOver` from `AMobaVictoryManager`. Attributes use `DOREPLIFETIME_CONDITION_NOTIFY` (`REPNOTIFY_Always`). Stun / slow / haste live on `UMobaStatusComponent` and replicate as their own fields.
+Montage, slam, fire-ring, ground-blast, and skillshot cosmetics are NetMulticast and return early on `IsLocallyControlled()`, so prediction doesn't play twice. SFX multicast skips authority and owner; they already played locally. Damage and gold numbers are Client RPCs on the pawn that dealt, took, or earned them. VFX and SFX are Unreliable. Montage, blast, and lobby RPCs are Reliable.
 
-**Presentation RPCs.** Montage, slam, fire-ring, ground-blast, and skillshot cosmetics are NetMulticast and return early on `IsLocallyControlled()`, so prediction does not play twice. SFX multicast skips authority *and* owner (they already played locally). Damage and gold numbers are Client RPCs on the pawn that dealt, took, or earned them. VFX/SFX are Unreliable; montage, blast, and lobby RPCs are Reliable.
-
-**Cooldown vs ping.** Simulated proxies start the cooldown tag late by RTT. `UMobaNetLibrary::CompensateCooldown` subtracts one-way ping (half of `PlayerState` ping, clamped to 0.2s) so the bar matches the press. `CooldownSanity` replicates so a late join still has remaining time. Lobby sliders write `FPacketSimulationSettings` on the client net driver (`PktLagMin` / `PktIncomingLagMin`) without a rebuild.
+Simulated proxies start the cooldown tag late by RTT. `UMobaNetLibrary::CompensateCooldown` subtracts one-way ping (half of `PlayerState` ping, clamped to 0.2s) so the bar matches the press. `CooldownSanity` replicates so a late join still has remaining time. Lobby sliders write `FPacketSimulationSettings` on the client net driver (`PktLagMin` / `PktIncomingLagMin`) without a rebuild.
 
 ```
 MobaProject/
@@ -133,7 +146,5 @@ MobaProject/
   Content/Moba/         maps, hero BPs, abilities, art, SFX
   Config/
 ```
-
-Lane AI is `AMobaMinionAIController`. The pawn keeps mesh, GAS, montage, and death. Aggro, leash, and focus-counting live on the controller so `Tick` on the character is not the brain. Towers pull aggro when a hero hits a hero; otherwise they shoot the closest enemy. The match ends when `AMobaVictoryManager` sees a team tower die.
 
 Made with C++ and Unreal 5.8. Credits in [CREDITS.md](CREDITS.md).
