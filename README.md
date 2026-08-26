@@ -18,7 +18,7 @@ Two heroes, one lane, a shop, minions, and towers. You pick a side, spend gold, 
 
 Unzip the archive and keep that whole folder together (`Engine` + the exe).
 
-**Standalone** is `MobaProject.exe`, and it's the one I play. **Host** starts a listen lobby on port **7777**. Pick **Brawler** or **Mage**, pick a team, then **Start**. A second copy of this build, or the client, can **Join** `127.0.0.1:7777`. From another machine, use the host's LAN IP.
+**Standalone** is `MobaProject.exe`. You can play on the same network using Lan or you can use a VPN like Radmin to connect over the internet. 
 
 **Client** is `MobaProjectClient.exe`. This build can join servers but can't host.
 
