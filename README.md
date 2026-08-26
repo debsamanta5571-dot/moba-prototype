@@ -24,7 +24,7 @@ Unzip the archive and keep that whole folder together (`Engine` + the exe).
 
 **Dedicated server** is `StartServer.bat`. It listens on port **7777** with no local player. Join from the client builds.
 
-I haven't rigorously tested the dedicated server but it should still work
+I haven't rigorously tested the dedicated server but it should still work.
 
 ### Controls
 
@@ -41,25 +41,16 @@ I haven't rigorously tested the dedicated server but it should still work
 ### Game features
 
 - 2 heroes: Brawler and Mage
-- 2 teams
-- 1 lane
 - Minion waves that walk the lane and fight
-- 2 towers; knock the enemy tower down to win
-- Shop in fountain (also usable while dead): Damage, Energy, CDR, Health, Resist, Move Speed, Gold Regen
-- Repeat buys scale `1.2^n`
-- 4 abilities per hero
+- 2 towers, destroythe enemy tower down to win
+- Shop in the fountain: Damage, Energy, CDR, Health, Resist, Move Speed, Gold Regen
+- 4 unique abilities per hero
 - Melee sweep, skillshot, ground slam, beam, and dash
-- Health, energy, and gold
 - Last-hit gold on minions
 - Fountain regen in spawn
 - Status effects: slow, stun, haste, and heal
 - Respawn after death
 - Tower aggro when a hero hits a hero
-- Predicted multiplayer casts
-- Host LAN / Join (port 7777)
-- Dedicated server
-
-Ability VFX are `DrawDebug` shapes. That's placeholder presentation, not Niagara.
 
 ## Architecture
 
