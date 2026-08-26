@@ -9,6 +9,7 @@
 #include "MobaBaseCharacter.h"
 #include "MobaFrontEndSubsystem.h"
 #include "MobaGameInstance.h"
+#include "MobaGameMode.h"
 #include "MobaVictoryManager.h"
 #include "Engine/Engine.h"
 #include "Engine/NetConnection.h"
@@ -541,7 +542,10 @@ void UMobaSessionSubsystem::AuthorityStartMatchFromLobby()
 		Front->ShowLoadingScreen(TEXT("LOADING..."));
 	}
 	const int32 WaitPlayers = FMath::Max(1, CountSessionPlayers());
-	FString Url = FString::Printf(TEXT("%s?WaitPlayers=%d"), *GetArenaMap().ToString(), WaitPlayers);
+	FString Url = FString::Printf(
+		TEXT("%s?game=/Script/MobaProject.MobaGameMode?WaitPlayers=%d"),
+		*GetArenaMap().ToString(),
+		WaitPlayers);
 	if (World->GetNetMode() == NM_ListenServer)
 	{
 		Url += TEXT("?listen");
@@ -617,6 +621,7 @@ void UMobaSessionSubsystem::HostGame()
 				bLobbySession = true;
 				if (Front)
 				{
+					Front->HideLoadingScreen();
 					Front->HideMenu();
 					Front->ShowLobby();
 				}
@@ -634,6 +639,7 @@ void UMobaSessionSubsystem::HostGame()
 			bLobbySession = true;
 			if (Front)
 			{
+				Front->HideLoadingScreen();
 				Front->HideMenu();
 				Front->ShowLobby();
 			}
@@ -676,7 +682,10 @@ void UMobaSessionSubsystem::DoRestartTravel()
 	UWorld* World = GetWorld();
 	if (World && World->GetNetMode() != NM_Client)
 	{
-		FString Url = FString::Printf(TEXT("%s?WaitPlayers=%d"), *GetArenaMap().ToString(), FMath::Max(1, CountSessionPlayers()));
+		FString Url = FString::Printf(
+			TEXT("%s?game=/Script/MobaProject.MobaGameMode?WaitPlayers=%d"),
+			*GetArenaMap().ToString(),
+			FMath::Max(1, CountSessionPlayers()));
 		if (World->GetNetMode() == NM_ListenServer)
 		{
 			Url += TEXT("?listen");
@@ -872,7 +881,7 @@ void UMobaSessionSubsystem::HandleLoadComplete(const FString& MapName)
 		{
 			if (Front)
 			{
-				Front->ShowLoadingScreen(TEXT("CONNECTING..."));
+				Front->ShowLoadingScreen(TEXT("CONNECTING..."), false);
 			}
 			return;
 		}
@@ -902,6 +911,20 @@ void UMobaSessionSubsystem::HandleLoadComplete(const FString& MapName)
 
 	bAttemptingJoin = false;
 	ClearJoinTimers();
+	if (UWorld* ArenaWorld = GetWorld())
+	{
+		if (!ArenaWorld->GetAuthGameMode<AMobaGameMode>())
+		{
+			if (Front)
+			{
+				Front->HideLoadingScreen();
+				Front->ReleaseMenuInput();
+			}
+			ApplySimulatedPing();
+			EnsurePingTimer();
+			return;
+		}
+	}
 	NotifyLocalMapReady();
 	if (ShouldShowJoinLoadout())
 	{
@@ -930,7 +953,7 @@ void UMobaSessionSubsystem::HandleLoadComplete(const FString& MapName)
 		}
 		else
 		{
-			Front->ShowLoadingScreen(TEXT("WAITING FOR PLAYERS..."));
+			Front->ShowLoadingScreen(TEXT("WAITING FOR PLAYERS..."), false);
 		}
 	}
 	ApplySimulatedPing();

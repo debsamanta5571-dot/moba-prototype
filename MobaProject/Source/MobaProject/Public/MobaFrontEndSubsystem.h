@@ -27,7 +27,7 @@ public:
 	void HideLobby();
 	void ShowJoinLoadout();
 	void FinishJoinLoadout();
-	void ShowLoadingScreen(const FString& Message = TEXT("LOADING..."));
+	void ShowLoadingScreen(const FString& Message = TEXT("LOADING..."), bool bPrepareMovie = true);
 	void HideLoadingScreen();
 	bool IsShowingLoading() const;
 	void ShowSettings();

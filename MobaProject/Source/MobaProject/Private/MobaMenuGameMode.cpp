@@ -156,13 +156,18 @@ void AMobaMenuGameMode::BeginPlay()
 
 	if (UMobaGameInstance* GI = GetGameInstance<UMobaGameInstance>())
 	{
-		if (GI->ShouldShowLobby())
+		UWorld* World = GetWorld();
+		const bool bMenuMap = World && World->GetMapName().Contains(TEXT("MobaMenu"), ESearchCase::IgnoreCase);
+		if (bMenuMap)
 		{
-			GI->ShowLobby();
-		}
-		else
-		{
-			GI->ShowMenu();
+			if (GI->ShouldShowLobby())
+			{
+				GI->ShowLobby();
+			}
+			else
+			{
+				GI->ShowMenu();
+			}
 		}
 		GI->HideLoadingScreen();
 	}

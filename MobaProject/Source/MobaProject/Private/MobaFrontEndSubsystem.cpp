@@ -27,7 +27,6 @@ void UMobaFrontEndSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	if (!IsRunningDedicatedServer())
 	{
 		SetupMovieLoadingScreen(TEXT("LOADING..."));
-		bLoadingScreenQueued = true;
 	}
 }
 
@@ -271,6 +270,7 @@ void UMobaFrontEndSubsystem::ApplyLobbyInput()
 
 void UMobaFrontEndSubsystem::ShowLobby()
 {
+	HideLoadingScreen();
 	UGameInstance* GI = GetGameInstance();
 	APlayerController* PC = GI ? GI->GetFirstLocalPlayerController() : nullptr;
 	if (!PC)
@@ -305,7 +305,7 @@ void UMobaFrontEndSubsystem::ShowLobby()
 	}
 }
 
-void UMobaFrontEndSubsystem::ShowLoadingScreen(const FString& Message)
+void UMobaFrontEndSubsystem::ShowLoadingScreen(const FString& Message, bool bPrepareMovie)
 {
 	const FString Text = Message.IsEmpty() ? TEXT("LOADING...") : Message;
 	bLoadingScreenQueued = true;
@@ -332,7 +332,10 @@ void UMobaFrontEndSubsystem::ShowLoadingScreen(const FString& Message)
 		LoadingWidget->SetMessage(Text);
 		LoadingWidget->PlaceInViewport();
 	}
-	SetupMovieLoadingScreen(Text);
+	if (bPrepareMovie)
+	{
+		SetupMovieLoadingScreen(Text);
+	}
 	ApplyUiPointer(LoadingWidget);
 }
 
@@ -445,6 +448,7 @@ void UMobaFrontEndSubsystem::FinishJoinLoadout()
 
 void UMobaFrontEndSubsystem::ShowMenu()
 {
+	HideLoadingScreen();
 	UGameInstance* GI = GetGameInstance();
 	APlayerController* PC = GI ? GI->GetFirstLocalPlayerController() : nullptr;
 	if (!PC)
