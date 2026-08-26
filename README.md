@@ -10,11 +10,21 @@ Two heroes, one lane, a shop, minions, and towers. You take a side, spend gold, 
 
 ## Play
 
-Open `MobaProject/MobaProject.uproject` in a **source-built Unreal 5.8** editor (this project is not wired to the Epic Games Launcher). Play `Moba/Maps/MobaMenu`.
+### Packaged (Win64)
 
-- **Host** starts a listen lobby. Pick **Brawler** or **Mage**, pick a team, then **Start**.
-- A second PIE window or packaged client **Join**s `127.0.0.1:7777`.
-- On a dedicated server, the first joiner is lobby leader.
+Unzip each download and keep that whole folder together (`Engine` + the exe).
+
+- [Standalone](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Standalone-Win64.zip) — `MobaProject.exe`. This is the one to play. **Host** starts a listen lobby on port **7777**. Pick **Brawler** or **Mage**, pick a team, then **Start**. A second copy of this build (or the client) **Join**s `127.0.0.1:7777`, or the host's LAN IP from another machine.
+- [Client](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Client-Win64.zip) — `MobaProjectClient.exe`. Host is hidden; this exe cannot listen. **Join** only, same address/port.
+- [Dedicated server](https://github.com/debsamanta5571-dot/moba-prototype/releases/latest/download/MobaPrototype-Server-Win64.zip) — run `StartServer.bat` (port **7777**, no local player). The first client to join is lobby leader and hits **Start**. Join with the client or standalone **Join**.
+
+Dedicated server + client-only is untested end-to-end, but it should still work. Standalone host is the path that was played.
+
+Windows may prompt for firewall on first Host or dedicated start; allow it so Join can see port 7777.
+
+### Editor
+
+Open `MobaProject/MobaProject.uproject` in a **source-built Unreal 5.8** editor (this project is not wired to the Epic Games Launcher). Play `Moba/Maps/MobaMenu`. Same Host / Join flow as standalone; a second PIE window can Join `127.0.0.1:7777`.
 
 | | |
 |---|---|
@@ -25,8 +35,6 @@ Open `MobaProject/MobaProject.uproject` in a **source-built Unreal 5.8** editor 
 | Inventory / descriptions / settings | Overlay panels |
 
 Ability VFX are `DrawDebug` shapes on purpose. Placeholder presentation, not Niagara.
-
-Packaged Win64 builds (standalone host, client-only, dedicated `StartServer.bat` on port **7777**) are local packages, not in this repo. The client exe cannot host.
 
 ## Architecture
 
