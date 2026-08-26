@@ -157,4 +157,4 @@ MobaProject/
   Config/
 ```
 
-Made with C++ and Unreal 5.8. Credits in [CREDITS.md](CREDITS.md).
+Made with C++ and Unreal 5.8.
