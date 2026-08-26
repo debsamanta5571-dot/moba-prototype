@@ -136,15 +136,15 @@ Lasting numbers live on the attribute set. Short effects live on an effect spec.
 
 ### Effects
 
-The ability CDO has an `Effects` array of `FMobaEffectSpec`. Each row is a type, a target (`HitActor` or `Self`), a magnitude, and a duration. Blueprint fills the rows. C++ applies them. This path does not use `UGameplayEffect`.
+`Effects` on the ability CDO is a `TArray<FMobaEffectSpec>`. Each spec is a type, a target (`HitActor` or `Self`), a magnitude, and a duration. You set those rows on the Blueprint. `ApplyMobaEffects` applies them.
 
-A spec never fires on its own. `ApplyAbilityHit` calls `ApplyMobaDamage` first. Only a successful write (authority, enemy, alive) runs the array. Hit specs go to the victim. Self specs go to the caster. Sweeps, waves, and beam ticks pass `bApplySelfEffects` on the first hit only, so a self-heal doesn't scale with how many bodies were in the cone.
+`ApplyAbilityHit` applies damage first. Specs run only if that write succeeds, so a friend or a simulated copy never gets the effect. `HitActor` specs go to the victim. `Self` specs go to the caster. Sweeps, slam waves, and beam ticks apply self effects on the first successful hit only. Otherwise, a self-heal would fire once per body in the cone.
 
-Heal writes the attribute set. Slow, stun, and haste go through `UMobaStatusComponent` on heroes and minions. The component replicates the flags, the speed multipliers, and the end times, and it sets loose tags (`State.Stunned`, `State.Slowed`, `State.Hasted`) so activation can refuse a stunned pawn. Stun also cancels `State.Beaming` and a held ground target. Towers have no status component.
+Heal adds Health, clamped to max. Slow, stun, and haste go through `UMobaStatusComponent` on heroes and minions. The component replicates the flags, the speed multipliers, and the end times. It also sets loose tags (`State.Stunned`, `State.Slowed`, `State.Hasted`) so a stunned pawn fails `CanActivateAbility`. Stun cancels beam and a held ground aim. Towers have no status component.
 
-Slow is a stack of `(1 - amount)` terms. Values over 1 are treated as percent, so `20` is 20%. Haste overwrites; it doesn't stack. Final walk speed is `base * slow * haste * plant`. Stun ignores that product and disables movement until the timer expires.
+Walk speed is `base * slow * haste * plant`. Haste multiplies with slow and plant; it doesn't replace the base. Slows stack with each other as `(1 - amount)`. Values over 1 are treated as percent, so `20` is 20%. Stun skips the product and disables movement until the timer expires.
 
-Putting a slow on a new bolt is an array entry, not a subclass. A new kind of effect is an `EMobaEffectType` value and a branch in `ApplySpec`. Timed crowd control gets a replicated field and a timer on the status component. A number that should last the match belongs on `UMobaAttributeSet`, and on `EMobaShopStat` if the shop should sell it.
+A slow on an existing bolt is another row in `Effects`, not a new class. A new effect type is an `EMobaEffectType` case and a branch in `ApplySpec`. If the effect lasts a few seconds, give it a replicated field and a timer on the status component. If it should last the match, put it on `UMobaAttributeSet`, and on `EMobaShopStat` if the shop should sell it. Don't start from `UGameplayEffect`.
 
 ### Networking
 
