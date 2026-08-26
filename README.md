@@ -1,8 +1,6 @@
 # Moba Prototype
 
-I've always wanted to make a 3D multiplayer MOBA. I spent years poking at it in Blueprint. This is the C++ prototype of that idea, written so I could play it with friends.
-
-Two heroes, one lane, a shop, minions, and towers. You pick a side, spend gold, and try to knock the other team's building down. It's a gameplay and netcode slice, not a shipped game.
+I've always wanted to make a 3D multiplayer MOBA. I've messed around in blueprint on and off with over a while. This here is a c++ multiplayer prototyp using GAS.
 
 ## Preview
 
