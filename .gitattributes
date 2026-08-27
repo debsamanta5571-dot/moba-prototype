@@ -1,2 +1,13 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# GitHub Linguist: count C++ / C#, skip Unreal binaries
+*.cpp linguist-detectable=true
+*.h linguist-detectable=true
+*.cs linguist-detectable=true
+*.uasset linguist-generated=true
+*.umap linguist-generated=true
+*.uexp linguist-generated=true
+*.ubulk linguist-generated=true
+*.uproject linguist-language=JSON
+
