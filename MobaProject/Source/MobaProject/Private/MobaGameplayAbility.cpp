@@ -3,9 +3,13 @@
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Animation/AnimMontage.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/Character.h"
 #include "MobaBaseCharacter.h"
 #include "MobaCombatLibrary.h"
 #include "MobaTower.h"
+#include "TimerManager.h"
 
 UMobaGameplayAbility::UMobaGameplayAbility()
 {
@@ -79,6 +83,11 @@ void UMobaGameplayAbility::EndAbility(
 	bool bReplicateEndAbility,
 	bool bWasCancelled)
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(NotifyFallbackTimer);
+		World->GetTimerManager().ClearTimer(MontageFallbackTimer);
+	}
 	EndCastPlant();
 	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
@@ -141,12 +150,73 @@ void UMobaGameplayAbility::StartCastMontage()
 		PlayMontage->OnInterrupted.AddDynamic(this, &UMobaGameplayAbility::HandleCastMontageDone);
 		PlayMontage->OnCancelled.AddDynamic(this, &UMobaGameplayAbility::HandleCastMontageDone);
 		PlayMontage->ReadyForActivation();
+		if (ShouldUseMontageFallback())
+		{
+			// Dedicated server often never ticks pose, so PlayMontageAndWait never completes and the spec stays active.
+			ScheduleMontageFallback(Montage);
+		}
 		return;
 	}
 
 	// Instant abilities (no anim) still need the same notify/end path.
 	HandleCastNotify(FGameplayEventData());
 	HandleCastMontageDone();
+}
+
+bool UMobaGameplayAbility::ShouldUseMontageFallback() const
+{
+	if (IsRunningDedicatedServer())
+	{
+		return true;
+	}
+	const ACharacter* Character = Cast<ACharacter>(GetAvatarActorFromActorInfo());
+	const USkeletalMeshComponent* Mesh = Character ? Character->GetMesh() : nullptr;
+	return !Mesh || !Mesh->GetAnimInstance();
+}
+
+void UMobaGameplayAbility::ScheduleMontageFallback(UAnimMontage* Montage)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		HandleCastNotifyFallback();
+		HandleCastMontageDone();
+		return;
+	}
+
+	float Length = Montage ? Montage->GetPlayLength() : 0.25f;
+	Length = FMath::Max(Length, 0.15f);
+	float NotifyTime = Length * 0.35f;
+	if (Montage)
+	{
+		for (const FAnimNotifyEvent& Event : Montage->Notifies)
+		{
+			const float Trigger = Event.GetTriggerTime();
+			if (Trigger > 0.f)
+			{
+				NotifyTime = FMath::Clamp(Trigger, 0.05f, Length);
+				break;
+			}
+		}
+	}
+
+	World->GetTimerManager().SetTimer(
+		NotifyFallbackTimer,
+		this,
+		&UMobaGameplayAbility::HandleCastNotifyFallback,
+		NotifyTime,
+		false);
+	World->GetTimerManager().SetTimer(
+		MontageFallbackTimer,
+		this,
+		&UMobaGameplayAbility::HandleCastMontageDone,
+		Length,
+		false);
+}
+
+void UMobaGameplayAbility::HandleCastNotifyFallback()
+{
+	HandleCastNotify(FGameplayEventData());
 }
 
 void UMobaGameplayAbility::HandleCastNotify(FGameplayEventData Payload)

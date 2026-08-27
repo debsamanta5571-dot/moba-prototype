@@ -125,9 +125,14 @@ protected:
 
 	virtual void StartCastMontage();
 	void EndCastPlant();
+	bool ShouldUseMontageFallback() const;
+	void ScheduleMontageFallback(UAnimMontage* Montage);
 
 	UFUNCTION()
 	void HandleCastNotify(FGameplayEventData Payload);
+
+	UFUNCTION()
+	void HandleCastNotifyFallback();
 
 	UFUNCTION()
 	void HandleCastMontageDone();
@@ -135,4 +140,6 @@ protected:
 	bool bCastNotifyFired = false;
 	bool bCastMontageDone = false;
 	bool bPlantedThisCast = false;
+	FTimerHandle NotifyFallbackTimer;
+	FTimerHandle MontageFallbackTimer;
 };

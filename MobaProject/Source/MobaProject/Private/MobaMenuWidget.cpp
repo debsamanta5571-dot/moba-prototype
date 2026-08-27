@@ -369,7 +369,7 @@ FString UMobaMenuWidget::GetJoinHost() const
 	{
 		JoinHost.LeftInline(Colon);
 	}
-	if (JoinHost.IsEmpty())
+	if (JoinHost.IsEmpty() || JoinHost.Equals(TEXT("localhost"), ESearchCase::IgnoreCase))
 	{
 		return TEXT("127.0.0.1");
 	}

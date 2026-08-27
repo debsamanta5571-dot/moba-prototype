@@ -104,6 +104,7 @@ protected:
 	FTimerHandle PingApplyTimer;
 	FTSTicker::FDelegateHandle JoinPollTicker;
 	double JoinGiveUpTime = 0.0;
+	int32 JoinRetryCount = 0;
 	int32 PendingTeamId = 0;
 	int32 SelectedHeroIndex = 0;
 	int32 SimulatedPingMinMs = 0;

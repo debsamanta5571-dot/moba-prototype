@@ -150,6 +150,16 @@ void AMobaBaseCharacter::BeginPlay()
 	Super::BeginPlay();
 	EnsureAbilitySlots();
 
+	if (IsRunningDedicatedServer())
+	{
+		if (USkeletalMeshComponent* Skel = GetMesh())
+		{
+			Skel->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+			Skel->bEnableUpdateRateOptimizations = false;
+			Skel->SetComponentTickEnabled(true);
+		}
+	}
+
 	if (UCapsuleComponent* Cap = GetCapsuleComponent())
 	{
 		Cap->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);

@@ -717,7 +717,7 @@ void UMobaSessionSubsystem::ReturnToMenu()
 void UMobaSessionSubsystem::JoinGame(const FString& Address)
 {
 	FString Url = Address.TrimStartAndEnd();
-	if (Url.IsEmpty())
+	if (Url.IsEmpty() || Url.Equals(TEXT("localhost"), ESearchCase::IgnoreCase))
 	{
 		Url = TEXT("127.0.0.1");
 	}
@@ -750,6 +750,7 @@ void UMobaSessionSubsystem::JoinGame(const FString& Address)
 	PendingJoinUrl = Url;
 	bJoinAborted = false;
 	bLobbySession = false;
+	JoinRetryCount = 0;
 	JoinErrorMessage.Reset();
 	if (Front)
 	{
@@ -1094,7 +1095,7 @@ void UMobaSessionSubsystem::BeginJoinTravel()
 		Front->HideMenu();
 	}
 
-	JoinGiveUpTime = FPlatformTime::Seconds() + 8.0;
+	JoinGiveUpTime = FPlatformTime::Seconds() + 45.0;
 	if (!JoinPollTicker.IsValid())
 	{
 		JoinPollTicker = FTSTicker::GetCoreTicker().AddTicker(
@@ -1103,7 +1104,7 @@ void UMobaSessionSubsystem::BeginJoinTravel()
 	}
 
 	PC->ClientTravel(PendingJoinUrl, TRAVEL_Absolute, false);
-	IgnoreNetFailUntil = FPlatformTime::Seconds() + 0.35;
+	IgnoreNetFailUntil = FPlatformTime::Seconds() + 3.0;
 }
 
 bool UMobaSessionSubsystem::TickJoinPoll(float DeltaTime)
@@ -1130,6 +1131,11 @@ bool UMobaSessionSubsystem::TickJoinPoll(float DeltaTime)
 	}
 	if (FPlatformTime::Seconds() >= JoinGiveUpTime)
 	{
+		if (WorldHasClientConnection(GetWorld()))
+		{
+			JoinGiveUpTime = FPlatformTime::Seconds() + 15.0;
+			return true;
+		}
 		OnJoinTimeout();
 		JoinPollTicker.Reset();
 		return false;
@@ -1160,7 +1166,6 @@ void UMobaSessionSubsystem::PollJoin()
 void UMobaSessionSubsystem::OnEngineNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
 {
 	(void)NetDriver;
-	(void)FailureType;
 	(void)ErrorString;
 	if (World && GetWorld() && World != GetWorld())
 	{
@@ -1170,10 +1175,32 @@ void UMobaSessionSubsystem::OnEngineNetworkFailure(UWorld* World, UNetDriver* Ne
 	{
 		return;
 	}
-	if (bAttemptingJoin)
+	if (!bAttemptingJoin)
 	{
-		FailJoin(TEXT("No lobby found"));
+		return;
 	}
+	if (TryFinishJoin() || WorldHasClientConnection(GetWorld()))
+	{
+		return;
+	}
+	if (JoinRetryCount < 1
+		&& (FailureType == ENetworkFailure::ConnectionTimeout
+			|| FailureType == ENetworkFailure::PendingConnectionFailure
+			|| FailureType == ENetworkFailure::ConnectionLost))
+	{
+		++JoinRetryCount;
+		IgnoreNetFailUntil = FPlatformTime::Seconds() + 3.0;
+		JoinGiveUpTime = FPlatformTime::Seconds() + 45.0;
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (APlayerController* PC = GI->GetFirstLocalPlayerController())
+			{
+				PC->ClientTravel(PendingJoinUrl, TRAVEL_Absolute, false);
+				return;
+			}
+		}
+	}
+	FailJoin(TEXT("No lobby found"));
 }
 
 void UMobaSessionSubsystem::OnEngineTravelFailure(UWorld* World, ETravelFailure::Type FailureType, const FString& ErrorString)
