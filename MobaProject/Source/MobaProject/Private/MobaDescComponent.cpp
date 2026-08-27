@@ -20,6 +20,51 @@ namespace
 		return FString::Printf(TEXT("%.1f"), Rounded);
 	}
 
+	FString DescForHeroSlot(const FString& OwnerName, const FString& Key, int32 Index)
+	{
+		const bool bMage = OwnerName.Contains(TEXT("Mage"));
+		const FString Slot = Key.IsEmpty() ? FString::FromInt(Index + 1) : Key;
+		if (bMage)
+		{
+			if (Slot.Equals(TEXT("LMB"), ESearchCase::IgnoreCase) || Index == 0)
+			{
+				return TEXT("LMB  Fire a shot that deals 20 damage.");
+			}
+			if (Slot.Equals(TEXT("Q"), ESearchCase::IgnoreCase) || Index == 1)
+			{
+				return TEXT("Q  Create a ring of fire that deals 60 damage to all nearby enemies.");
+			}
+			if (Slot.Equals(TEXT("Shift"), ESearchCase::IgnoreCase) || Index == 2)
+			{
+				return TEXT("Shift  Blink a short distance in the direction you are moving.");
+			}
+			if (Slot.Equals(TEXT("E"), ESearchCase::IgnoreCase) || Index == 3)
+			{
+				return TEXT("E  Fire a beam that deals 8 damage each tick for 1.2 seconds.");
+			}
+		}
+		else
+		{
+			if (Slot.Equals(TEXT("LMB"), ESearchCase::IgnoreCase) || Index == 0)
+			{
+				return TEXT("LMB  Punch an enemy for 35 damage.");
+			}
+			if (Slot.Equals(TEXT("Q"), ESearchCase::IgnoreCase) || Index == 1)
+			{
+				return TEXT("Q  Fire a shot that deals 80 damage and stuns for 1.5 seconds.");
+			}
+			if (Slot.Equals(TEXT("Shift"), ESearchCase::IgnoreCase) || Index == 2)
+			{
+				return TEXT("Shift  Dash in the direction you are moving.");
+			}
+			if (Slot.Equals(TEXT("E"), ESearchCase::IgnoreCase) || Index == 3)
+			{
+				return TEXT("E  Slam the ground to deal 80 damage and slow nearby enemies.");
+			}
+		}
+		return FString();
+	}
+
 	FString ApplyDamageBoost(const FString& In, float Boost)
 	{
 		if (In.IsEmpty() || FMath::IsNearlyEqual(Boost, 1.f, 0.001f))
@@ -92,52 +137,58 @@ TArray<FMobaAbilityDesc> UMobaDescComponent::GetLines() const
 {
 	const AMobaBaseCharacter* OwnerChar = Cast<AMobaBaseCharacter>(GetOwner());
 	const float Boost = OwnerChar ? OwnerChar->GetDamageModifier() : 1.f;
+	const FString OwnerName = OwnerChar ? OwnerChar->GetClass()->GetName() : FString();
 
-	if (Abilities.Num() > 0)
-	{
-		TArray<FMobaAbilityDesc> Lines = Abilities;
-		for (FMobaAbilityDesc& Line : Lines)
-		{
-			Line.Text = ApplyDamageBoost(Line.Text, Boost);
-		}
-		return Lines;
-	}
-
-	TArray<FMobaAbilityDesc> Fallback;
-	if (!OwnerChar)
-	{
-		return Fallback;
-	}
-
-	const int32 Count = OwnerChar->GetAbilitySlotCount();
+	TArray<FMobaAbilityDesc> Lines;
+	const int32 Count = OwnerChar ? OwnerChar->GetAbilitySlotCount() : Abilities.Num();
 	for (int32 i = 0; i < Count; ++i)
 	{
 		FMobaAbilityDesc Line;
-		UTexture2D* Icon = nullptr;
-		float Remaining = 0.f;
-		float Duration = 0.f;
-		OwnerChar->GetAbilityHudInfo(i, Icon, Remaining, Duration);
-		Line.Image = Icon;
+		if (Abilities.IsValidIndex(i))
+		{
+			Line = Abilities[i];
+		}
+		else if (OwnerChar)
+		{
+			UTexture2D* Icon = nullptr;
+			float Remaining = 0.f;
+			float Duration = 0.f;
+			OwnerChar->GetAbilityHudInfo(i, Icon, Remaining, Duration);
+			Line.Image = Icon;
+		}
 
-		FString Label = OwnerChar->GetAbilityKeyLabel(i);
-		if (Label.IsEmpty())
+		FString Label;
+		if (OwnerChar)
 		{
-			Label = FString::FromInt(i + 1);
+			Label = OwnerChar->GetAbilityKeyLabel(i);
 		}
-		FString AbilityName = TEXT("Ability");
-		if (UClass* AbilityClass = OwnerChar->GetAbilitySlot(i).Get())
+		FString Text = DescForHeroSlot(OwnerName, Label, i);
+		if (Text.IsEmpty())
 		{
-			AbilityName = AbilityClass->GetName();
-			AbilityName.RemoveFromEnd(TEXT("_C"));
-			AbilityName.RemoveFromStart(TEXT("BP_GA_"));
-			AbilityName.RemoveFromStart(TEXT("BP_"));
-			AbilityName.RemoveFromStart(TEXT("GA_Moba"));
-			AbilityName.RemoveFromStart(TEXT("GA_"));
+			Text = Line.Text;
 		}
-		Line.Text = Label + TEXT("  ") + AbilityName;
-		Fallback.Add(Line);
+		if (Text.IsEmpty() && OwnerChar)
+		{
+			if (Label.IsEmpty())
+			{
+				Label = FString::FromInt(i + 1);
+			}
+			FString AbilityName = TEXT("Ability");
+			if (UClass* AbilityClass = OwnerChar->GetAbilitySlot(i).Get())
+			{
+				AbilityName = AbilityClass->GetName();
+				AbilityName.RemoveFromEnd(TEXT("_C"));
+				AbilityName.RemoveFromStart(TEXT("BP_GA_"));
+				AbilityName.RemoveFromStart(TEXT("BP_"));
+				AbilityName.RemoveFromStart(TEXT("GA_Moba"));
+				AbilityName.RemoveFromStart(TEXT("GA_"));
+			}
+			Text = Label + TEXT("  ") + AbilityName;
+		}
+		Line.Text = ApplyDamageBoost(Text, Boost);
+		Lines.Add(Line);
 	}
-	return Fallback;
+	return Lines;
 }
 
 void UMobaDescComponent::EnsureOverlay()
