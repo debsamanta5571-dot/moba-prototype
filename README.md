@@ -29,7 +29,7 @@ Download the archive and extract the zip.
 | WASD | Move |
 | Mouse | Look and Aim |
 | Abilites| LMB, Q, LShift, E| 
-| Shop | B, Can only work in your spawn area or when your dead |
+| Shop | B, Only works in your spawn area or when your dead |
 | Ability Infortmation| TAB|
 | Inventory| I |
 | Settings |Backspace or Escape|
